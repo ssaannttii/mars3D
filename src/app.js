@@ -40,7 +40,7 @@ const state = {
   wireframe: false,
   autoRotate: true,
   atmosphere: true,
-  clouds: false,
+  clouds: true,
 };
 
 const canvas = document.querySelector("#scene");

@@ -21,10 +21,10 @@ const ATMOSPHERE_FRAG = `
     vec3 n = normalize(vWorldNormal);
     float rim = 1.0 - max(dot(viewDir, n), 0.0);
     rim = pow(rim, uPower);
-    float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float sunGlow = pow(sunDot, 1.2) * 0.55 + 0.45;
+    float sunDot = clamp(dot(normalize(uSunDirection), n), -0.2, 1.0);
+    float sunGlow = pow(max(sunDot, 0.0), 1.2) * 0.7 + 0.35;
     vec3 col = uColor * rim * uIntensity * sunGlow;
-    gl_FragColor = vec4(col, rim * 0.95);
+    gl_FragColor = vec4(col, rim * 0.98);
   }
 `;
 
@@ -33,6 +33,7 @@ const CLOUDS_FRAG = `
   uniform float uOpacity;
   uniform vec3 uSunDirection;
   uniform vec3 uTint;
+  uniform vec3 uShadow;
   varying vec3 vWorldNormal;
   varying vec3 vWorldPos;
 
@@ -51,27 +52,54 @@ const CLOUDS_FRAG = `
   }
   float fbm(vec2 p) {
     float v = 0.0;
-    float a = 0.5;
-    for (int i = 0; i < 5; i++) {
+    float a = 0.55;
+    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+    for (int i = 0; i < 6; i++) {
       v += a * vnoise(p);
-      p *= 2.03;
+      p = rot * p * 2.08;
       a *= 0.5;
     }
     return v;
+  }
+
+  vec2 swirl(vec2 p, vec2 center, float strength, float radius) {
+    vec2 d = p - center;
+    float dist = length(d);
+    float t = smoothstep(radius, 0.0, dist) * strength;
+    float c = cos(t);
+    float s = sin(t);
+    return center + mat2(c, -s, s, c) * d;
   }
 
   void main() {
     vec3 n = normalize(vWorldNormal);
     float lat = asin(clamp(n.y, -1.0, 1.0));
     float lon = atan(n.z, n.x);
-    vec2 uv = vec2(lon * 0.6 + uTime * 0.04, lat * 1.1);
-    float bands = fbm(uv * 2.4) * 0.55 + fbm(uv * 6.0 + 11.0) * 0.45;
-    float swirl = smoothstep(0.45, 0.82, bands);
-    float polar = smoothstep(1.05, 1.45, abs(lat));
-    float density = clamp(swirl * 0.9 + polar * 0.25, 0.0, 1.0);
+    vec2 uv = vec2(lon * 1.15, lat * 1.6);
+    uv.x += uTime * 0.025;
+
+    vec2 warped = uv;
+    warped = swirl(warped, vec2(1.4, 0.4), 0.9, 0.5);
+    warped = swirl(warped, vec2(-2.1, -0.6), -0.8, 0.55);
+    warped = swirl(warped, vec2(3.2, -0.2), 0.7, 0.45);
+    warped = swirl(warped, vec2(-0.6, 0.9), -0.6, 0.4);
+
+    float band0 = fbm(warped * 1.6);
+    float band1 = fbm(warped * 3.8 + 7.4);
+    float band2 = fbm(uv * 8.5 - 3.1);
+    float base = band0 * 0.45 + band1 * 0.4 + band2 * 0.15;
+
+    float latitudinalBands = 0.55 + 0.4 * sin(lat * 4.5);
+    float itzc = exp(-pow(lat * 2.6, 2.0)) * 0.3;
+    float density = clamp(base * latitudinalBands + itzc - 0.42, 0.0, 1.0);
+    density = pow(density, 1.6);
+
     float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float lit = 0.35 + sunDot * 0.85;
-    vec3 col = uTint * lit;
+    float lit = 0.32 + sunDot * 1.05;
+    float thickness = density * density;
+    vec3 col = mix(uShadow, uTint, lit);
+    col = mix(col, uTint * 1.18, thickness * sunDot);
+
     float alpha = density * uOpacity;
     if (alpha < 0.02) discard;
     gl_FragColor = vec4(col, alpha);
@@ -79,15 +107,15 @@ const CLOUDS_FRAG = `
 `;
 
 export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
-  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.045, 96, 64);
+  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.06, 96, 64);
   const haloMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: ATMOSPHERE_FRAG,
     uniforms: {
-      uColor: { value: new THREE.Color("#a8c5e8") },
+      uColor: { value: new THREE.Color("#6fa8d8") },
       uSunDirection: { value: new THREE.Vector3(3.8, 2.6, 2.2).normalize() },
-      uIntensity: { value: 0.55 },
-      uPower: { value: 4.2 },
+      uIntensity: { value: 1.05 },
+      uPower: { value: 3.2 },
     },
     transparent: true,
     side: THREE.BackSide,
@@ -98,17 +126,16 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
   halo.renderOrder = 5;
   scene.add(halo);
 
-  const inner = { visible: true };
-
-  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.012, 96, 64);
+  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.024, 128, 80);
   const cloudMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: CLOUDS_FRAG,
     uniforms: {
       uTime: { value: 0 },
-      uOpacity: { value: 0.32 },
+      uOpacity: { value: 0.72 },
       uSunDirection: haloMaterial.uniforms.uSunDirection,
-      uTint: { value: new THREE.Color("#f7efe2") },
+      uTint: { value: new THREE.Color("#ffffff") },
+      uShadow: { value: new THREE.Color("#7a8090") },
     },
     transparent: true,
     side: THREE.FrontSide,
@@ -116,12 +143,11 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
   });
   const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
   clouds.renderOrder = 4;
-  clouds.visible = false;
+  clouds.visible = true;
   scene.add(clouds);
 
   return {
     halo,
-    inner,
     clouds,
     setSunDirection(vec3) {
       haloMaterial.uniforms.uSunDirection.value.copy(vec3).normalize();
@@ -129,16 +155,19 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
     setVisualMode(mode) {
       if (mode === "mars") {
         haloMaterial.uniforms.uColor.value.set("#c8804a");
-        haloMaterial.uniforms.uIntensity.value = 0.4;
-        cloudMaterial.uniforms.uTint.value.set("#d9c4a8");
+        haloMaterial.uniforms.uIntensity.value = 0.65;
+        cloudMaterial.uniforms.uTint.value.set("#e0c8a8");
+        cloudMaterial.uniforms.uShadow.value.set("#6a5a4a");
       } else if (mode === "atlas") {
-        haloMaterial.uniforms.uColor.value.set("#b9d2ec");
-        haloMaterial.uniforms.uIntensity.value = 0.5;
-        cloudMaterial.uniforms.uTint.value.set("#ffffff");
+        haloMaterial.uniforms.uColor.value.set("#a8c8e8");
+        haloMaterial.uniforms.uIntensity.value = 0.85;
+        cloudMaterial.uniforms.uTint.value.set("#f4f4f8");
+        cloudMaterial.uniforms.uShadow.value.set("#808898");
       } else {
-        haloMaterial.uniforms.uColor.value.set("#a8c5e8");
-        haloMaterial.uniforms.uIntensity.value = 0.55;
-        cloudMaterial.uniforms.uTint.value.set("#f7efe2");
+        haloMaterial.uniforms.uColor.value.set("#6fa8d8");
+        haloMaterial.uniforms.uIntensity.value = 1.05;
+        cloudMaterial.uniforms.uTint.value.set("#ffffff");
+        cloudMaterial.uniforms.uShadow.value.set("#7a8090");
       }
     },
     setVisible(show) {
@@ -152,7 +181,7 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
     },
     tick(dt) {
       cloudMaterial.uniforms.uTime.value += dt;
-      clouds.rotation.y += dt * 0.018;
+      clouds.rotation.y += dt * 0.012;
     },
   };
 }

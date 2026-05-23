@@ -3,17 +3,19 @@ import { clamp, smoothstep } from "./topography.js";
 const palette = {
   earth: {
     water: [
-      [0.0, "#7ce7df"],
-      [0.34, "#1a9db4"],
-      [1.0, "#05284f"],
+      [0.0, "#3a8fb8"],
+      [0.18, "#1f5f9a"],
+      [0.45, "#0d3a72"],
+      [1.0, "#04183f"],
     ],
     land: [
-      [0.0, "#2c536f"],
-      [0.22, "#4a8170"],
-      [0.42, "#8c9060"],
-      [0.62, "#b78153"],
-      [0.82, "#d2b06b"],
-      [1.0, "#ead7ad"],
+      [0.0, "#3a5a4c"],
+      [0.18, "#4e7654"],
+      [0.34, "#6f8a52"],
+      [0.5, "#9a8a55"],
+      [0.66, "#a87a4a"],
+      [0.82, "#8c6a4f"],
+      [1.0, "#c6b896"],
     ],
   },
   mars: {
@@ -58,8 +60,9 @@ export function createColorTools(THREE) {
   scratch.snow = new THREE.Color("#f2f7f2");
   scratch.snowShadow = new THREE.Color("#c7d7d4");
   scratch.polarIce = new THREE.Color("#e6f2ef");
-  scratch.green = new THREE.Color("#5f986d");
-  scratch.desert = new THREE.Color("#c79a5a");
+  scratch.green = new THREE.Color("#4a7d4f");
+  scratch.darkGreen = new THREE.Color("#2d5436");
+  scratch.desert = new THREE.Color("#b88f55");
   scratch.rock = new THREE.Color("#78665a");
   scratch.shadow = new THREE.Color("#28313a");
   scratch.light = new THREE.Color("#fff0bc");
@@ -118,16 +121,18 @@ function applyBiomes(color, { height, latitude, seaLevel, slope, biomes, visualM
 
   const absLat = Math.abs(latitude);
   const aboveSea = height - seaLevel;
-  const coastalWet = 1 - smoothstep(300, 4200, Math.max(aboveSea, 0));
-  const temperate = 1 - smoothstep(34, 74, absLat);
-  const tropicDry = smoothstep(4, 27, absLat) * (1 - smoothstep(33, 48, absLat));
-  const interiorDry = smoothstep(1800, 7600, aboveSea) * (1 - coastalWet * 0.7);
-  const highRock = smoothstep(4500, 9500, height) * (0.4 + slope * 0.6);
+  const coastalWet = 1 - smoothstep(200, 3200, Math.max(aboveSea, 0));
+  const temperate = 1 - smoothstep(32, 70, absLat);
+  const tropical = 1 - smoothstep(0, 28, absLat);
+  const tropicDry = smoothstep(8, 27, absLat) * (1 - smoothstep(34, 48, absLat));
+  const interiorDry = smoothstep(1400, 6800, aboveSea) * (1 - coastalWet * 0.65);
+  const highRock = smoothstep(4500, 9500, height) * (0.42 + slope * 0.58);
 
   let result = scratch.mix.copy(color);
-  result.lerp(scratch.green, coastalWet * temperate * 0.28);
-  result.lerp(scratch.desert, clamp(tropicDry * 0.2 + interiorDry * 0.28, 0, 0.42));
-  result.lerp(scratch.rock, highRock * 0.24);
+  result.lerp(scratch.darkGreen, coastalWet * tropical * 0.55);
+  result.lerp(scratch.green, coastalWet * temperate * 0.5);
+  result.lerp(scratch.desert, clamp(tropicDry * 0.28 + interiorDry * 0.34, 0, 0.5));
+  result.lerp(scratch.rock, highRock * 0.28);
   return result;
 }
 
@@ -142,10 +147,10 @@ function applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, v
 
   if (snowCaps) {
     const flatness = 1 - clamp(slope, 0, 1);
-    const snowAmount = smoothstep(6200, 12500, height) * (0.48 + flatness * 0.52);
+    const snowAmount = smoothstep(9500, 17000, height) * (0.25 + flatness * 0.45);
     if (snowAmount > 0) {
-      const shadowAmount = smoothstep(6200, 15000, height) * 0.18;
-      result = scratch.mix.copy(result).lerp(scratch.snowShadow, shadowAmount).lerp(scratch.snow, snowAmount * 0.86);
+      const shadowAmount = smoothstep(9500, 17000, height) * 0.15;
+      result = scratch.mix.copy(result).lerp(scratch.snowShadow, shadowAmount).lerp(scratch.snow, snowAmount * 0.7);
     }
   }
 
