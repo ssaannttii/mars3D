@@ -46,13 +46,13 @@ const CLOUDS_FRAG = `
     float v = 0.5 - lat / 3.14159265;
     vec4 sample0 = texture2D(uCloudMap, vec2(u, v));
     vec4 sample1 = texture2D(uCloudMap, vec2(u * 1.7 + 0.13, v * 1.3 + 0.07));
-    float density = sample0.r * 0.78 + sample1.r * 0.32;
-    density = clamp(pow(density, 1.25) - 0.08, 0.0, 1.0);
+    float density = sample0.r * 0.85 + sample1.r * 0.28;
+    density = clamp(pow(density, 1.05), 0.0, 1.0);
 
     float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float lit = 0.34 + sunDot * 1.0;
+    float lit = 0.55 + sunDot * 1.05;
     vec3 col = mix(uShadow, uTint, lit);
-    col = mix(col, uTint * 1.16, density * sunDot * 0.6);
+    col = mix(col, uTint * 1.25, density * sunDot * 0.7);
 
     float alpha = density * uOpacity;
     if (alpha < 0.02) discard;
@@ -61,15 +61,15 @@ const CLOUDS_FRAG = `
 `;
 
 export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0, cloudTexture = null }) {
-  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.06, 96, 64);
+  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.075, 128, 80);
   const haloMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: ATMOSPHERE_FRAG,
     uniforms: {
-      uColor: { value: new THREE.Color("#6fa8d8") },
+      uColor: { value: new THREE.Color("#8ec0ec") },
       uSunDirection: { value: new THREE.Vector3(3.8, 2.6, 2.2).normalize() },
-      uIntensity: { value: 1.05 },
-      uPower: { value: 3.2 },
+      uIntensity: { value: 1.55 },
+      uPower: { value: 2.6 },
     },
     transparent: true,
     side: THREE.BackSide,
@@ -80,17 +80,17 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0, cloudTex
   halo.renderOrder = 5;
   scene.add(halo);
 
-  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.018, 128, 80);
+  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.028, 128, 80);
   const cloudMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: CLOUDS_FRAG,
     uniforms: {
       uCloudMap: { value: cloudTexture },
       uTime: { value: 0 },
-      uOpacity: { value: 0.9 },
+      uOpacity: { value: 1.0 },
       uSunDirection: haloMaterial.uniforms.uSunDirection,
-      uTint: { value: new THREE.Color("#ffffff") },
-      uShadow: { value: new THREE.Color("#6a7384") },
+      uTint: { value: new THREE.Color("#f8faff") },
+      uShadow: { value: new THREE.Color("#506074") },
     },
     transparent: true,
     side: THREE.FrontSide,

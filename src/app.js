@@ -87,6 +87,27 @@ marsAlbedoTexture.wrapS = THREE.RepeatWrapping;
 marsAlbedoTexture.colorSpace = THREE.SRGBColorSpace;
 marsAlbedoTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
 
+const detailTexture = textureLoader.load("./data/mars_albedo.jpg", (tex) => {
+  const img = tex.image;
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(img, 0, 0);
+  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  for (let i = 0; i < data.data.length; i += 4) {
+    const lum = data.data[i] * 0.3 + data.data[i + 1] * 0.59 + data.data[i + 2] * 0.11;
+    const v = 165 + (lum - 165) * 0.55;
+    data.data[i] = data.data[i + 1] = data.data[i + 2] = Math.max(0, Math.min(255, v));
+  }
+  ctx.putImageData(data, 0, 0);
+  detailTexture.image = canvas;
+  detailTexture.needsUpdate = true;
+});
+detailTexture.wrapS = THREE.RepeatWrapping;
+detailTexture.colorSpace = THREE.SRGBColorSpace;
+detailTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+
 const starsTexture = textureLoader.load("./data/stars_milky_way.jpg", (tex) => {
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -115,12 +136,13 @@ scene.environment = envTarget.texture;
 
 const terrainMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
-  roughness: 0.92,
+  roughness: 0.95,
   metalness: 0.0,
-  envMapIntensity: 0.15,
+  envMapIntensity: 0.12,
   flatShading: false,
   normalMap: normalTexture,
-  normalScale: new THREE.Vector2(0.85, 0.85),
+  normalScale: new THREE.Vector2(1.1, 1.1),
+  map: detailTexture,
 });
 
 let waterMaterial = null;
@@ -304,7 +326,7 @@ function rebuildRivers() {
     const material = new THREE.MeshPhysicalMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.78,
+      opacity: 0.55,
       roughness: 0.9,
       metalness: 0,
       transmission: 0,

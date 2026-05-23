@@ -649,7 +649,7 @@ function cellDistanceKm(a, b) {
 }
 
 function riverWidthWorld(discharge) {
-  return clamp(0.0006 + Math.sqrt(discharge) * 0.00024, 0.0008, 0.0055);
+  return clamp(0.00028 + Math.sqrt(discharge) * 0.00012, 0.00038, 0.0028);
 }
 
 function forEachNeighbor(x, y, visit) {
