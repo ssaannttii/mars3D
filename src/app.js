@@ -6,6 +6,7 @@ import { FloodModel } from "./flood.js";
 import { RESOLUTIONS, buildTerrainGeometry, buildWaterGeometry, updateTerrainColors } from "./geometry.js";
 import { buildRiverGeometry, simulateRivers } from "./rivers.js";
 import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from "./topography.js";
+import { createAtmosphere } from "./atmosphere.js";
 
 const LAKE_THRESHOLD_KM2 = 80000;
 
@@ -38,6 +39,8 @@ const state = {
   labelsVisible: true,
   wireframe: false,
   autoRotate: true,
+  atmosphere: true,
+  clouds: false,
 };
 
 const canvas = document.querySelector("#scene");
@@ -67,22 +70,48 @@ const sun = new THREE.DirectionalLight(0xfff3da, 4.3);
 sun.position.set(3.8, 2.6, 2.2);
 scene.add(sun);
 
+const atmosphere = createAtmosphere({ THREE, scene });
+atmosphere.setSunDirection(sun.position);
+
+const envScene = new THREE.Scene();
+envScene.background = new THREE.Color(0x0a0c11);
+const envSun = new THREE.Mesh(
+  new THREE.SphereGeometry(2.5, 16, 16),
+  new THREE.MeshBasicMaterial({ color: 0xfff0d4 }),
+);
+envSun.position.set(8, 5, 3).normalize().multiplyScalar(15);
+envScene.add(envSun);
+const envHaze = new THREE.Mesh(
+  new THREE.SphereGeometry(40, 24, 16),
+  new THREE.MeshBasicMaterial({ color: 0x231a16, side: THREE.BackSide }),
+);
+envScene.add(envHaze);
+const pmrem = new THREE.PMREMGenerator(renderer);
+const envTarget = pmrem.fromScene(envScene, 0.04);
+scene.environment = envTarget.texture;
+
 const terrainMaterial = new THREE.MeshStandardMaterial({
   vertexColors: true,
-  roughness: 0.9,
-  metalness: 0.02,
+  roughness: 0.92,
+  metalness: 0.0,
+  envMapIntensity: 0.15,
   flatShading: false,
 });
 
 const waterMaterial = new THREE.MeshPhysicalMaterial({
   vertexColors: true,
   transparent: true,
-  opacity: 0.42,
-  roughness: 0.08,
-  metalness: 0,
-  transmission: 0.12,
-  clearcoat: 0.65,
-  clearcoatRoughness: 0.18,
+  opacity: 0.55,
+  roughness: 0.06,
+  metalness: 0.0,
+  transmission: 0.18,
+  ior: 1.33,
+  thickness: 0.4,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.05,
+  reflectivity: 0.55,
+  specularIntensity: 1.0,
+  envMapIntensity: 1.4,
   depthWrite: false,
   side: THREE.DoubleSide,
 });
@@ -121,6 +150,8 @@ const el = {
   autorotateToggle: document.querySelector("#autorotate-toggle"),
   resetCamera: document.querySelector("#reset-camera"),
   beautyShot: document.querySelector("#beauty-shot"),
+  atmosphereToggle: document.querySelector("#atmosphere-toggle"),
+  cloudsToggle: document.querySelector("#clouds-toggle"),
   seaPresetButtons: document.querySelectorAll("[data-sea-preset]"),
   resolutionButtons: document.querySelectorAll("[data-resolution]"),
   visualButtons: document.querySelectorAll("[data-visual-mode]"),
@@ -466,9 +497,24 @@ function wireEvents() {
     button.addEventListener("click", () => {
       state.visualMode = button.dataset.visualMode;
       el.visualButtons.forEach((item) => item.classList.toggle("active", item === button));
+      atmosphere.setVisualMode(state.visualMode);
       updateVisuals({ rebuildWater: true });
     });
   });
+
+  if (el.atmosphereToggle) {
+    el.atmosphereToggle.addEventListener("change", (event) => {
+      state.atmosphere = event.target.checked;
+      atmosphere.setVisible(state.atmosphere);
+    });
+  }
+
+  if (el.cloudsToggle) {
+    el.cloudsToggle.addEventListener("change", (event) => {
+      state.clouds = event.target.checked;
+      atmosphere.setCloudsVisible(state.clouds);
+    });
+  }
 
   el.cameraButtons.forEach((button) => {
     button.addEventListener("click", () => {
@@ -811,11 +857,16 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
+let prevTime = performance.now();
 function animate() {
   requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min(0.1, (now - prevTime) / 1000);
+  prevTime = now;
   controls.update();
   updateLabelVisibility();
   if (stars) stars.rotation.y += 0.00008;
+  atmosphere.tick(dt);
   renderer.render(scene, camera);
 }
 
