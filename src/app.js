@@ -42,6 +42,7 @@ const state = {
   autoRotate: true,
   atmosphere: true,
   clouds: true,
+  iceExtent: 0.35,
 };
 
 const canvas = document.querySelector("#scene");
@@ -162,6 +163,8 @@ const el = {
   cloudsToggle: document.querySelector("#clouds-toggle"),
   timelapseButton: document.querySelector("#timelapse-button"),
   shareButton: document.querySelector("#share-button"),
+  iceExtent: document.querySelector("#ice-extent"),
+  iceOutput: document.querySelector("#ice-output"),
   seaPresetButtons: document.querySelectorAll("[data-sea-preset]"),
   resolutionButtons: document.querySelectorAll("[data-resolution]"),
   visualButtons: document.querySelectorAll("[data-visual-mode]"),
@@ -292,6 +295,7 @@ function rebuildRivers() {
     deltas: riverModel.deltas,
     state,
     colorTools,
+    heightSampler: (lat, lon) => sampleHeight(meta, heightData, lat, lon),
   });
   if (riverMesh) {
     riverMesh.geometry.dispose();
@@ -300,8 +304,8 @@ function rebuildRivers() {
     const material = new THREE.MeshPhysicalMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.68,
-      roughness: 0.95,
+      opacity: 0.78,
+      roughness: 0.9,
       metalness: 0,
       transmission: 0,
       clearcoat: 0,
@@ -309,9 +313,10 @@ function rebuildRivers() {
       specularIntensity: 0.05,
       side: THREE.DoubleSide,
       depthWrite: false,
+      depthTest: true,
       polygonOffset: true,
-      polygonOffsetFactor: -1,
-      polygonOffsetUnits: -1,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4,
     });
     riverMesh = new THREE.Mesh(geometry, material);
     riverMesh.renderOrder = 3.5;
@@ -556,6 +561,13 @@ function wireEvents() {
   el.beautyShot.addEventListener("click", () => beautyShot());
   if (el.timelapseButton) el.timelapseButton.addEventListener("click", () => runSeaTimelapse());
   if (el.shareButton) el.shareButton.addEventListener("click", () => copyShareLink());
+  if (el.iceExtent) {
+    el.iceExtent.addEventListener("input", (event) => {
+      state.iceExtent = Number(event.target.value) / 100;
+      if (el.iceOutput) el.iceOutput.textContent = `${Math.round(state.iceExtent * 100)}%`;
+      updateVisuals({ rebuildWater: false });
+    });
+  }
   el.minimap.addEventListener("click", onMinimapClick);
 
   renderer.domElement.addEventListener("pointermove", onPointerMove);
@@ -673,6 +685,7 @@ function drawMinimap() {
         ultraCreative: state.ultraCreative,
         ultraIntensity: state.ultraIntensity,
         procedural: 0,
+        iceExtent: state.iceExtent,
       });
       const offset = (y * width + x) * 4;
       image.data[offset] = Math.round(color.r * 255);

@@ -47,7 +47,7 @@ export function simulateRivers({ meta, heightData, flood, state }) {
   };
 }
 
-export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, colorTools }) {
+export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, colorTools, heightSampler }) {
   const positions = [];
   const colors = [];
   const indices = [];
@@ -57,9 +57,13 @@ export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, 
     appendRiverRibbon({ THREE, meta, river, state, positions, colors, indices, baseColor, colorTools });
   }
   for (const delta of deltas || []) {
-    appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools });
+    appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools, heightSampler });
   }
   for (const lake of lakes || []) {
+    if (heightSampler) {
+      const centerH = heightSampler(lake.centerLat, lake.centerLon);
+      if (centerH > lake.surface + 80) continue;
+    }
     appendLake({ THREE, meta, lake, state, positions, colors, indices, colorTools });
   }
 
@@ -394,10 +398,10 @@ function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indic
     const point = river.points[i];
     const prev = river.points[Math.max(0, i - 1)];
     const next = river.points[Math.min(river.points.length - 1, i + 1)];
-    const prevPos = sphericalPoint(THREE, meta, prev.lat, prev.lon, displayRiverHeight(prev), state.verticalScale);
-    const nextPos = sphericalPoint(THREE, meta, next.lat, next.lon, displayRiverHeight(next), state.verticalScale);
+    const prevPos = sphericalPoint(THREE, meta, prev.lat, prev.lon, displayRiverHeight(prev, state), state.verticalScale);
+    const nextPos = sphericalPoint(THREE, meta, next.lat, next.lon, displayRiverHeight(next, state), state.verticalScale);
     const tangent = nextPos.sub(prevPos).normalize();
-    const center = sphericalPoint(THREE, meta, point.lat, point.lon, displayRiverHeight(point), state.verticalScale);
+    const center = sphericalPoint(THREE, meta, point.lat, point.lon, displayRiverHeight(point, state), state.verticalScale);
     const normal = center.clone().normalize();
     const side = new THREE.Vector3().crossVectors(normal, tangent).normalize();
     const progress = i / Math.max(1, river.points.length - 1);
@@ -428,9 +432,12 @@ function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indic
   }
 }
 
-function appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools }) {
+function appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools, heightSampler }) {
   for (const finger of delta.fingers) {
     const segments = 6;
+    let prevLeft = null;
+    let prevRight = null;
+    let prevValid = false;
     for (let s = 0; s <= segments; s += 1) {
       const t = s / segments;
       const lat = finger.baseLat + (finger.tipLat - finger.baseLat) * t;
@@ -438,6 +445,12 @@ function appendDelta({ THREE, meta, delta, state, positions, colors, indices, co
       if (lonDelta > 180) lonDelta -= 360;
       if (lonDelta < -180) lonDelta += 360;
       const lon = wrapLongitude(finger.baseLon + lonDelta * t);
+      const localHeight = heightSampler ? heightSampler(lat, lon) : -Infinity;
+      const overWater = localHeight < state.seaLevel + 5;
+      if (!overWater) {
+        prevValid = false;
+        continue;
+      }
       const elev = state.seaLevel + 40;
       const center = sphericalPoint(THREE, meta, lat, lon, elev, state.verticalScale);
       const next = sphericalPoint(THREE, meta, lat + 0.02, lon, elev, state.verticalScale);
@@ -452,9 +465,12 @@ function appendDelta({ THREE, meta, delta, state, positions, colors, indices, co
       const color = colorTools.waterColor({ depth: 600 * (1 - t), visualMode: state.visualMode });
       color.toArray(colors, colors.length);
       color.toArray(colors, colors.length);
-      if (s > 0) {
+      if (prevValid) {
         indices.push(base - 2, base - 1, base, base, base - 1, base + 1);
       }
+      prevLeft = left;
+      prevRight = right;
+      prevValid = true;
     }
   }
 }
@@ -496,8 +512,12 @@ function appendLake({ THREE, meta, lake, state, positions, colors, indices, colo
   }
 }
 
-function displayRiverHeight(point) {
-  return Math.max(point.height, point.filled - 30) + 150;
+function displayRiverHeight(point, state) {
+  if (!state) return point.height + 10;
+  const sea = state.seaLevel || 0;
+  const overWater = point.height < sea - 50;
+  if (overWater) return sea + 45;
+  return point.height + 10;
 }
 
 function markLargestWaterBody(wet, ocean) {

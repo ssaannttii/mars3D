@@ -87,6 +87,7 @@ function terrainColor({
   polarIce,
   biomes,
   procedural,
+  iceExtent = 0.35,
 }) {
   const mode = palette[visualMode] ? visualMode : "earth";
   if (flooded) {
@@ -101,7 +102,7 @@ function terrainColor({
   let color = ramp(palette[mode].land, t);
   color = applyBiomes(color, { height, latitude, seaLevel, slope, biomes, visualMode: mode });
   color = applyProceduralColor(color, procedural);
-  color = applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, visualMode: mode });
+  color = applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, visualMode: mode, iceExtent });
 
   if (!softShore) return color;
 
@@ -142,7 +143,7 @@ function applyProceduralColor(color, procedural) {
   return scratch.mix.copy(color).lerp(scratch.shadow, clamp(-procedural, 0, 0.24));
 }
 
-function applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, visualMode }) {
+function applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, visualMode, iceExtent }) {
   let result = color;
 
   if (snowCaps) {
@@ -155,8 +156,11 @@ function applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, v
   }
 
   if (polarIce && snowCaps) {
-    const latitudeAmount = smoothstep(70, 88, Math.abs(latitude));
-    const altitudeBias = visualMode === "earth" ? 0.85 : 0.5;
+    const extent = clamp(iceExtent, 0, 1);
+    const innerEdge = 88 - extent * 86;
+    const outerEdge = Math.max(innerEdge - 12, 0);
+    const latitudeAmount = smoothstep(outerEdge, innerEdge, Math.abs(latitude));
+    const altitudeBias = visualMode === "earth" ? 0.92 : 0.55;
     if (latitudeAmount > 0) {
       result = scratch.mix.copy(result).lerp(scratch.polarIce, latitudeAmount * altitudeBias);
     }

@@ -99,6 +99,7 @@ export function updateTerrainColors({ geometry, meta, flood, state, colorTools }
         ultraCreative: state.ultraCreative,
         ultraIntensity: state.ultraIntensity,
         procedural: ultraColorVariation(heights[i], latitudes[i], longitudes[i], slopes[i], state),
+        iceExtent: state.iceExtent,
       })
       .toArray(colors.array, i * 3);
   }
