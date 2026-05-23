@@ -152,6 +152,8 @@ const el = {
   beautyShot: document.querySelector("#beauty-shot"),
   atmosphereToggle: document.querySelector("#atmosphere-toggle"),
   cloudsToggle: document.querySelector("#clouds-toggle"),
+  timelapseButton: document.querySelector("#timelapse-button"),
+  shareButton: document.querySelector("#share-button"),
   seaPresetButtons: document.querySelectorAll("[data-sea-preset]"),
   resolutionButtons: document.querySelectorAll("[data-resolution]"),
   visualButtons: document.querySelectorAll("[data-visual-mode]"),
@@ -195,6 +197,7 @@ async function init() {
 
     addStars();
     wireEvents();
+    applyShareState();
     await refreshFlood({ rebuildTerrain: true });
     buildLabels();
     buildOrientation();
@@ -537,6 +540,8 @@ function wireEvents() {
   });
 
   el.beautyShot.addEventListener("click", () => beautyShot());
+  if (el.timelapseButton) el.timelapseButton.addEventListener("click", () => runSeaTimelapse());
+  if (el.shareButton) el.shareButton.addEventListener("click", () => copyShareLink());
   el.minimap.addEventListener("click", onMinimapClick);
 
   renderer.domElement.addEventListener("pointermove", onPointerMove);
@@ -881,4 +886,92 @@ function animate() {
 
 function formatMeters(value) {
   return `${Math.round(value).toLocaleString("es-ES")} m`;
+}
+
+let timelapseAnim = null;
+async function runSeaTimelapse() {
+  if (timelapseAnim) return;
+  const original = state.seaLevel;
+  const stops = [-9000, -5000, -2000, 0, 1500, 3500, 6000, 8500, 11000, 6000, 2000, 0];
+  for (const level of stops) {
+    timelapseAnim = level;
+    setSeaLevel(level);
+    await wait(700);
+  }
+  timelapseAnim = null;
+  setSeaLevel(original);
+}
+
+function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function copyShareLink() {
+  const params = new URLSearchParams();
+  params.set("sea", String(state.seaLevel));
+  params.set("scale", String(state.verticalScale));
+  params.set("visual", state.visualMode);
+  params.set("res", state.resolution);
+  if (state.ultraCreative) params.set("ultra", state.ultraIntensity);
+  if (!state.atmosphere) params.set("atm", "0");
+  if (state.clouds) params.set("clouds", "1");
+  if (!state.snowCaps) params.set("snow", "0");
+  if (!state.biomes) params.set("bio", "0");
+  if (!state.tributariesVisible) params.set("trib", "0");
+  const cam = camera.position;
+  params.set("cam", `${cam.x.toFixed(3)},${cam.y.toFixed(3)},${cam.z.toFixed(3)}`);
+  const url = `${window.location.origin}${window.location.pathname}#${params.toString()}`;
+  navigator.clipboard.writeText(url).then(
+    () => {
+      const old = el.shareButton.textContent;
+      el.shareButton.textContent = "Copiado ✓";
+      setTimeout(() => (el.shareButton.textContent = old), 1500);
+    },
+    () => {
+      window.prompt("Copia el link:", url);
+    },
+  );
+}
+
+function applyShareState() {
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return;
+  const params = new URLSearchParams(hash);
+  if (params.has("sea")) state.seaLevel = Number(params.get("sea")) || 0;
+  if (params.has("scale")) state.verticalScale = Number(params.get("scale")) || 18;
+  if (params.has("visual")) state.visualMode = params.get("visual");
+  if (params.has("res")) state.resolution = params.get("res");
+  if (params.has("ultra")) {
+    state.ultraCreative = true;
+    state.ultraIntensity = params.get("ultra");
+  }
+  if (params.get("atm") === "0") state.atmosphere = false;
+  if (params.get("clouds") === "1") state.clouds = true;
+  if (params.get("snow") === "0") state.snowCaps = false;
+  if (params.get("bio") === "0") state.biomes = false;
+  if (params.get("trib") === "0") state.tributariesVisible = false;
+  if (params.has("cam")) {
+    const [x, y, z] = params.get("cam").split(",").map(Number);
+    if ([x, y, z].every(Number.isFinite)) camera.position.set(x, y, z);
+  }
+  syncControlsToState();
+}
+
+function syncControlsToState() {
+  if (el.seaLevel) el.seaLevel.value = String(state.seaLevel);
+  if (el.seaNumber) el.seaNumber.value = String(state.seaLevel);
+  if (el.heightScale) el.heightScale.value = String(state.verticalScale);
+  el.visualButtons.forEach((b) => b.classList.toggle("active", b.dataset.visualMode === state.visualMode));
+  el.resolutionButtons.forEach((b) => b.classList.toggle("active", b.dataset.resolution === state.resolution));
+  el.ultraButtons.forEach((b) => b.classList.toggle("active", b.dataset.ultraIntensity === state.ultraIntensity));
+  if (el.ultraToggle) el.ultraToggle.checked = state.ultraCreative;
+  if (el.snowToggle) el.snowToggle.checked = state.snowCaps;
+  if (el.polarToggle) el.polarToggle.checked = state.polarIce;
+  if (el.biomeToggle) el.biomeToggle.checked = state.biomes;
+  if (el.tributariesToggle) el.tributariesToggle.checked = state.tributariesVisible;
+  if (el.atmosphereToggle) el.atmosphereToggle.checked = state.atmosphere;
+  if (el.cloudsToggle) el.cloudsToggle.checked = state.clouds;
+  atmosphere.setVisible(state.atmosphere);
+  atmosphere.setCloudsVisible(state.clouds);
+  atmosphere.setVisualMode(state.visualMode);
 }

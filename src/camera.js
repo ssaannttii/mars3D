@@ -8,18 +8,45 @@ export const CAMERA_TARGETS = {
   poles: { label: "Polos", lat: 72.0, lon: 0.0, distance: 2.45 },
 };
 
-export function focusCamera({ THREE, camera, controls, meta, target }) {
+let activeAnim = null;
+
+export function focusCamera({ THREE, camera, controls, meta, target, smooth = true, durationMs = 1100 }) {
   const point = sphericalPoint(THREE, meta, target.lat, target.lon, 0, 1).normalize();
-  const position = point.clone().multiplyScalar(target.distance);
-  camera.position.copy(position);
-  camera.lookAt(0, 0, 0);
-  controls.target.set(0, 0, 0);
-  controls.update();
+  const destination = point.clone().multiplyScalar(target.distance);
+  if (!smooth) {
+    camera.position.copy(destination);
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    return;
+  }
+  animateTo({ camera, controls, destination, durationMs });
 }
 
 export function resetCamera(camera, controls) {
-  camera.position.set(0.35, 0.28, 3.25);
-  camera.lookAt(0, 0, 0);
-  controls.target.set(0, 0, 0);
-  controls.update();
+  animateTo({
+    camera,
+    controls,
+    destination: new (camera.position.constructor)(0.35, 0.28, 3.25),
+    durationMs: 900,
+  });
+}
+
+function animateTo({ camera, controls, destination, durationMs }) {
+  if (activeAnim) cancelAnimationFrame(activeAnim);
+  const start = camera.position.clone();
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - startTime) / durationMs);
+    const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    camera.position.lerpVectors(start, destination, eased).normalize().multiplyScalar(
+      start.length() * (1 - eased) + destination.length() * eased,
+    );
+    camera.lookAt(0, 0, 0);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    if (t < 1) activeAnim = requestAnimationFrame(step);
+    else activeAnim = null;
+  }
+  activeAnim = requestAnimationFrame(step);
 }
