@@ -1,0 +1,824 @@
+import * as THREE from "three";
+import { OrbitControls } from "../vendor/OrbitControls.js";
+import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
+import { createColorTools } from "./colors.js";
+import { FloodModel } from "./flood.js";
+import { RESOLUTIONS, buildTerrainGeometry, buildWaterGeometry, updateTerrainColors } from "./geometry.js";
+import { buildRiverGeometry, simulateRivers } from "./rivers.js";
+import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from "./topography.js";
+
+const LAKE_THRESHOLD_KM2 = 80000;
+
+const PLACES = [
+  { name: "Olympus Mons", lat: 18.65, lon: 226.2 },
+  { name: "Valles Marineris", lat: -14.0, lon: 300.0 },
+  { name: "Hellas Planitia", lat: -42.4, lon: 70.5 },
+  { name: "Argyre Planitia", lat: -49.7, lon: 316.0 },
+  { name: "Gale Crater", lat: -5.4, lon: 137.8 },
+  { name: "Jezero Crater", lat: 18.44, lon: 77.45 },
+  { name: "Elysium Mons", lat: 25.0, lon: 147.0 },
+];
+
+const state = {
+  seaLevel: 0,
+  verticalScale: 18,
+  resolution: "medium",
+  visualMode: "earth",
+  biomes: true,
+  ultraCreative: false,
+  ultraIntensity: "cinematic",
+  waterVisible: true,
+  riversVisible: true,
+  tributariesVisible: true,
+  connectedFlood: true,
+  softShore: true,
+  snowCaps: true,
+  polarIce: true,
+  orientationVisible: true,
+  labelsVisible: true,
+  wireframe: false,
+  autoRotate: true,
+};
+
+const canvas = document.querySelector("#scene");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x08090d, 0.035);
+
+const camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.01, 100);
+camera.position.set(0.35, 0.28, 3.25);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.rotateSpeed = 0.42;
+controls.zoomSpeed = 0.75;
+controls.minDistance = 1.45;
+controls.maxDistance = 7.5;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.25;
+
+scene.add(new THREE.HemisphereLight(0xc8f7ff, 0x2d170f, 2.1));
+const sun = new THREE.DirectionalLight(0xfff3da, 4.3);
+sun.position.set(3.8, 2.6, 2.2);
+scene.add(sun);
+
+const terrainMaterial = new THREE.MeshStandardMaterial({
+  vertexColors: true,
+  roughness: 0.9,
+  metalness: 0.02,
+  flatShading: false,
+});
+
+const waterMaterial = new THREE.MeshPhysicalMaterial({
+  vertexColors: true,
+  transparent: true,
+  opacity: 0.42,
+  roughness: 0.08,
+  metalness: 0,
+  transmission: 0.12,
+  clearcoat: 0.65,
+  clearcoatRoughness: 0.18,
+  depthWrite: false,
+  side: THREE.DoubleSide,
+});
+
+const el = {
+  loadState: document.querySelector("#load-state"),
+  seaLevel: document.querySelector("#sea-level"),
+  seaNumber: document.querySelector("#sea-number"),
+  seaOutput: document.querySelector("#sea-output"),
+  heightScale: document.querySelector("#height-scale"),
+  scaleOutput: document.querySelector("#scale-output"),
+  realScale: document.querySelector("#real-scale"),
+  visibleScale: document.querySelector("#visible-scale"),
+  resolutionOutput: document.querySelector("#resolution-output"),
+  visualOutput: document.querySelector("#visual-output"),
+  ultraOutput: document.querySelector("#ultra-output"),
+  scaleOutput2: document.querySelector("#scale-output-2"),
+  floodedOutput: document.querySelector("#flooded-output"),
+  waterOutput: document.querySelector("#water-output"),
+  riverOutput: document.querySelector("#river-output"),
+  cursorOutput: document.querySelector("#cursor-output"),
+  minimap: document.querySelector("#minimap"),
+  balanceWater: document.querySelector("#balance-water"),
+  waterToggle: document.querySelector("#water-toggle"),
+  riversToggle: document.querySelector("#rivers-toggle"),
+  tributariesToggle: document.querySelector("#tributaries-toggle"),
+  connectedToggle: document.querySelector("#connected-toggle"),
+  shoreToggle: document.querySelector("#shore-toggle"),
+  snowToggle: document.querySelector("#snow-toggle"),
+  polarToggle: document.querySelector("#polar-toggle"),
+  biomeToggle: document.querySelector("#biome-toggle"),
+  ultraToggle: document.querySelector("#ultra-toggle"),
+  orientationToggle: document.querySelector("#orientation-toggle"),
+  labelsToggle: document.querySelector("#labels-toggle"),
+  wireToggle: document.querySelector("#wire-toggle"),
+  autorotateToggle: document.querySelector("#autorotate-toggle"),
+  resetCamera: document.querySelector("#reset-camera"),
+  beautyShot: document.querySelector("#beauty-shot"),
+  seaPresetButtons: document.querySelectorAll("[data-sea-preset]"),
+  resolutionButtons: document.querySelectorAll("[data-resolution]"),
+  visualButtons: document.querySelectorAll("[data-visual-mode]"),
+  ultraButtons: document.querySelectorAll("[data-ultra-intensity]"),
+  cameraButtons: document.querySelectorAll("[data-camera-target]"),
+  tourButtons: document.querySelectorAll("[data-tour]"),
+};
+
+const labelGroup = new THREE.Group();
+scene.add(labelGroup);
+const orientationGroup = new THREE.Group();
+scene.add(orientationGroup);
+
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+const colorTools = createColorTools(THREE);
+
+let meta;
+let heightData;
+let poleHeights;
+let floodModel;
+let flood;
+let terrainMesh;
+let waterMesh;
+let riverMesh;
+let riverModel = { rivers: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0 } };
+let stars;
+let floodToken = 0;
+let mapMarker = { latitude: 0, longitude: 0 };
+let minimapBase;
+
+init();
+
+async function init() {
+  try {
+    const topography = await loadTopography();
+    meta = topography.meta;
+    heightData = topography.heightData;
+    poleHeights = { north: topography.northPoleHeight, south: topography.southPoleHeight };
+    floodModel = new FloodModel(meta, heightData);
+
+    addStars();
+    wireEvents();
+    await refreshFlood({ rebuildTerrain: true });
+    buildLabels();
+    buildOrientation();
+    updateLabels();
+
+    el.loadState.textContent = "listo";
+    animate();
+  } catch (error) {
+    console.error(error);
+    el.loadState.textContent = "error";
+    el.cursorOutput.textContent = "no se pudo cargar MOLA";
+  }
+}
+
+async function refreshFlood({ rebuildTerrain = false } = {}) {
+  const token = ++floodToken;
+  el.loadState.textContent = "calculando";
+  const nextFlood = await floodModel.calculate({
+    seaLevel: state.seaLevel,
+    connected: state.connectedFlood,
+    lakeThresholdKm2: LAKE_THRESHOLD_KM2,
+  });
+  if (token !== floodToken) return;
+
+  flood = nextFlood;
+  if (!terrainMesh || rebuildTerrain) rebuildTerrainMesh();
+  else updateTerrainColors({ geometry: terrainMesh.geometry, meta, flood, state, colorTools });
+  rebuildWaterMesh();
+  rebuildRivers();
+  drawMinimap();
+  updateAllReadouts();
+  el.loadState.textContent = "listo";
+}
+
+function rebuildTerrainMesh() {
+  const geometry = buildTerrainGeometry({
+    THREE,
+    meta,
+    heightData,
+    flood,
+    state,
+    colorTools,
+    poleHeights,
+  });
+
+  if (terrainMesh) {
+    terrainMesh.geometry.dispose();
+    terrainMesh.geometry = geometry;
+  } else {
+    terrainMesh = new THREE.Mesh(geometry, terrainMaterial);
+    terrainMesh.renderOrder = 2;
+    scene.add(terrainMesh);
+  }
+  terrainMaterial.wireframe = state.wireframe;
+  el.resolutionOutput.textContent = `${RESOLUTIONS[state.resolution].lon} x ${RESOLUTIONS[state.resolution].lat}`;
+}
+
+function rebuildWaterMesh() {
+  const geometry = buildWaterGeometry({ THREE, meta, heightData, flood, state, colorTools });
+  if (waterMesh) {
+    waterMesh.geometry.dispose();
+    waterMesh.geometry = geometry;
+  } else {
+    waterMesh = new THREE.Mesh(geometry, waterMaterial);
+    waterMesh.renderOrder = 3;
+    scene.add(waterMesh);
+  }
+  waterMesh.visible = state.waterVisible && geometry.getIndex().count > 0;
+}
+
+function rebuildRivers() {
+  riverModel = simulateRivers({ meta, heightData, flood, state });
+  const geometry = buildRiverGeometry({ THREE, meta, rivers: riverModel.rivers, state, colorTools });
+  if (riverMesh) {
+    riverMesh.geometry.dispose();
+    riverMesh.geometry = geometry;
+  } else {
+    const material = new THREE.MeshPhysicalMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.68,
+      roughness: 0.95,
+      metalness: 0,
+      transmission: 0,
+      clearcoat: 0,
+      clearcoatRoughness: 1,
+      specularIntensity: 0.05,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
+      polygonOffsetUnits: -1,
+    });
+    riverMesh = new THREE.Mesh(geometry, material);
+    riverMesh.renderOrder = 3.5;
+    scene.add(riverMesh);
+  }
+  riverMesh.visible = state.riversVisible && geometry.getIndex().count > 0;
+}
+
+function updateAllReadouts() {
+  el.seaOutput.textContent = formatMeters(state.seaLevel);
+  el.seaLevel.value = String(state.seaLevel);
+  el.seaNumber.value = String(state.seaLevel);
+  el.scaleOutput.textContent = `${state.verticalScale}x`;
+  el.heightScale.value = String(state.verticalScale);
+  el.visualOutput.textContent = state.visualMode === "earth" ? "Earth-like" : "Mars raw";
+  if (state.visualMode === "atlas") el.visualOutput.textContent = "Atlas";
+  el.ultraOutput.textContent = ultraLabel(state.ultraIntensity);
+  el.floodedOutput.textContent = `${flood.stats.floodedPercent.toFixed(1)}%`;
+  el.waterOutput.textContent = formatWaterStats(flood.stats);
+  el.riverOutput.textContent = formatRiverStats(riverModel.stats);
+  el.scaleOutput2.textContent = `Radio ${Math.round(meta.marsRadiusMeters / 1000)} km`;
+  el.polarToggle.disabled = !state.snowCaps;
+}
+
+function formatWaterStats(stats) {
+  if (stats.floodedAreaKm2 < 1) return "seco";
+  const ocean = formatArea(stats.oceanAreaKm2);
+  if (!state.connectedFlood) return `${ocean} todo bajo nivel`;
+  if (stats.lakeCount === 0) return `${ocean} oceano`;
+  return `${ocean} oceano / ${stats.lakeCount} lagos`;
+}
+
+function formatArea(value) {
+  if (value >= 1000000) return `${(value / 1000000).toFixed(1)}M km2`;
+  return `${Math.round(value / 1000)}k km2`;
+}
+
+function formatRiverStats(stats) {
+  if (!stats.count) return "sin cauces";
+  return `${stats.count} rios / ${Math.round(stats.longestKm).toLocaleString("es-ES")} km / ${stats.widestKm.toFixed(1)} km`;
+}
+
+function setSeaLevel(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+  state.seaLevel = Math.min(22000, Math.max(-9000, Math.round(numericValue / 100) * 100));
+  void refreshFlood();
+}
+
+async function setBalancedSeaLevel() {
+  el.loadState.textContent = "buscando 50%";
+  let low = meta.minimumMeters;
+  let high = meta.maximumMeters;
+  let bestLevel = 0;
+  let bestDelta = Infinity;
+
+  for (let i = 0; i < 14; i += 1) {
+    const mid = Math.round(((low + high) / 2) / 100) * 100;
+    const result = await floodModel.calculate({
+      seaLevel: mid,
+      connected: state.connectedFlood,
+      lakeThresholdKm2: LAKE_THRESHOLD_KM2,
+    });
+    const delta = Math.abs(result.stats.floodedPercent - 50);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      bestLevel = mid;
+    }
+    if (result.stats.floodedPercent < 50) low = mid + 100;
+    else high = mid - 100;
+  }
+
+  setSeaLevel(bestLevel);
+}
+
+function setVerticalScale(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return;
+  state.verticalScale = Math.min(40, Math.max(1, Math.round(numericValue)));
+  rebuildTerrainMesh();
+  rebuildWaterMesh();
+  rebuildRivers();
+  updateLabels();
+  buildOrientation();
+  updateAllReadouts();
+}
+
+function updateVisuals({ rebuildWater = false } = {}) {
+  if (!terrainMesh) return;
+  updateTerrainColors({ geometry: terrainMesh.geometry, meta, flood, state, colorTools });
+  if (rebuildWater) rebuildWaterMesh();
+  if (state.riversVisible) rebuildRivers();
+  drawMinimap();
+  updateAllReadouts();
+}
+
+function wireEvents() {
+  el.seaLevel.addEventListener("input", (event) => setSeaLevel(event.target.value));
+  el.seaNumber.addEventListener("input", (event) => setSeaLevel(event.target.value));
+  el.seaNumber.addEventListener("change", (event) => setSeaLevel(event.target.value));
+  el.seaPresetButtons.forEach((button) => button.addEventListener("click", () => setSeaLevel(button.dataset.seaPreset)));
+  el.balanceWater.addEventListener("click", () => void setBalancedSeaLevel());
+  el.heightScale.addEventListener("input", (event) => setVerticalScale(event.target.value));
+  el.realScale.addEventListener("click", () => setVerticalScale(1));
+  el.visibleScale.addEventListener("click", () => setVerticalScale(18));
+
+  el.waterToggle.addEventListener("change", (event) => {
+    state.waterVisible = event.target.checked;
+    if (waterMesh) waterMesh.visible = state.waterVisible && waterMesh.geometry.getIndex().count > 0;
+  });
+
+  el.riversToggle.addEventListener("change", (event) => {
+    state.riversVisible = event.target.checked;
+    rebuildRivers();
+    updateAllReadouts();
+  });
+
+  el.tributariesToggle.addEventListener("change", (event) => {
+    state.tributariesVisible = event.target.checked;
+    rebuildRivers();
+    updateAllReadouts();
+  });
+
+  el.connectedToggle.addEventListener("change", (event) => {
+    state.connectedFlood = event.target.checked;
+    void refreshFlood();
+  });
+
+  el.shoreToggle.addEventListener("change", (event) => {
+    state.softShore = event.target.checked;
+    updateVisuals({ rebuildWater: false });
+  });
+
+  el.snowToggle.addEventListener("change", (event) => {
+    state.snowCaps = event.target.checked;
+    updateVisuals({ rebuildWater: false });
+  });
+
+  el.polarToggle.addEventListener("change", (event) => {
+    state.polarIce = event.target.checked;
+    updateVisuals({ rebuildWater: false });
+  });
+
+  el.biomeToggle.addEventListener("change", (event) => {
+    state.biomes = event.target.checked;
+    updateVisuals({ rebuildWater: false });
+  });
+
+  el.ultraToggle.addEventListener("change", (event) => {
+    state.ultraCreative = event.target.checked;
+    rebuildTerrainMesh();
+    rebuildWaterMesh();
+    rebuildRivers();
+    updateLabels();
+    updateAllReadouts();
+  });
+
+  el.ultraButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.ultraIntensity = button.dataset.ultraIntensity;
+      el.ultraButtons.forEach((item) => item.classList.toggle("active", item === button));
+      if (state.ultraCreative) {
+        rebuildTerrainMesh();
+        rebuildWaterMesh();
+        rebuildRivers();
+        updateLabels();
+      } else {
+        updateVisuals({ rebuildWater: false });
+      }
+      updateAllReadouts();
+    });
+  });
+
+  el.labelsToggle.addEventListener("change", (event) => {
+    state.labelsVisible = event.target.checked;
+    labelGroup.visible = state.labelsVisible;
+  });
+
+  el.orientationToggle.addEventListener("change", (event) => {
+    state.orientationVisible = event.target.checked;
+    orientationGroup.visible = state.orientationVisible;
+  });
+
+  el.wireToggle.addEventListener("change", (event) => {
+    state.wireframe = event.target.checked;
+    terrainMaterial.wireframe = state.wireframe;
+  });
+
+  el.autorotateToggle.addEventListener("change", (event) => {
+    state.autoRotate = event.target.checked;
+    controls.autoRotate = state.autoRotate;
+  });
+
+  el.resetCamera.addEventListener("click", () => resetCamera(camera, controls));
+
+  el.resolutionButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.resolution = button.dataset.resolution;
+      el.resolutionButtons.forEach((item) => item.classList.toggle("active", item === button));
+      rebuildTerrainMesh();
+      rebuildWaterMesh();
+      rebuildRivers();
+      updateAllReadouts();
+    });
+  });
+
+  el.visualButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.visualMode = button.dataset.visualMode;
+      el.visualButtons.forEach((item) => item.classList.toggle("active", item === button));
+      updateVisuals({ rebuildWater: true });
+    });
+  });
+
+  el.cameraButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = CAMERA_TARGETS[button.dataset.cameraTarget];
+      if (target) focusCamera({ THREE, camera, controls, meta, target });
+    });
+  });
+
+  el.tourButtons.forEach((button) => {
+    button.addEventListener("click", () => runTour(button.dataset.tour));
+  });
+
+  el.beautyShot.addEventListener("click", () => beautyShot());
+  el.minimap.addEventListener("click", onMinimapClick);
+
+  renderer.domElement.addEventListener("pointermove", onPointerMove);
+  renderer.domElement.addEventListener("pointerleave", () => {
+    el.cursorOutput.textContent = "pasa el cursor por Marte";
+  });
+  window.addEventListener("resize", onResize);
+}
+
+function ultraLabel(value) {
+  if (value === "subtle") return "Sutil";
+  if (value === "extreme") return "Extremo";
+  return "Cinematico";
+}
+
+function buildLabels() {
+  labelGroup.clear();
+  for (const place of PLACES) {
+    const sprite = makeLabelSprite(place.name);
+    sprite.userData.place = place;
+    labelGroup.add(sprite);
+  }
+}
+
+function updateLabels() {
+  labelGroup.visible = state.labelsVisible;
+  for (const sprite of labelGroup.children) {
+    const { lat, lon } = sprite.userData.place;
+    const height = sampleHeight(meta, heightData, lat, lon);
+    const position = sphericalPoint(THREE, meta, lat, lon, height + 9500, state.verticalScale);
+    sprite.position.copy(position);
+  }
+}
+
+function updateLabelVisibility() {
+  if (!state.labelsVisible) return;
+  const cameraNormal = camera.position.clone().normalize();
+  for (const sprite of labelGroup.children) {
+    const front = sprite.position.clone().normalize().dot(cameraNormal) > -0.08;
+    sprite.visible = front;
+    if (sprite.userData.place) {
+      const distance = camera.position.distanceTo(sprite.position);
+      const width = Math.min(0.28, Math.max(0.08, distance * 0.11));
+      sprite.scale.set(width, width * 0.25, 1);
+    }
+  }
+}
+
+function buildOrientation() {
+  orientationGroup.clear();
+  orientationGroup.visible = state.orientationVisible;
+  orientationGroup.add(makeLatLine(0, 0x8dd7dd, 0.7));
+  orientationGroup.add(makeMeridianLine(0, 0xffffff, 0.34));
+  orientationGroup.add(makeMeridianLine(180, 0xffffff, 0.22));
+
+  const north = makeLabelSprite("N");
+  north.scale.set(0.12, 0.05, 1);
+  north.position.copy(sphericalPoint(THREE, meta, 90, 0, 90000, state.verticalScale));
+  orientationGroup.add(north);
+
+  const south = makeLabelSprite("S");
+  south.scale.set(0.12, 0.05, 1);
+  south.position.copy(sphericalPoint(THREE, meta, -90, 0, 90000, state.verticalScale));
+  orientationGroup.add(south);
+}
+
+function makeLatLine(latitude, color, opacity) {
+  const points = [];
+  for (let i = 0; i <= 240; i += 1) {
+    points.push(sphericalPoint(THREE, meta, latitude, (i / 240) * 360, 50000, state.verticalScale));
+  }
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  return new THREE.Line(geometry, material);
+}
+
+function makeMeridianLine(longitude, color, opacity) {
+  const points = [];
+  for (let i = 0; i <= 180; i += 1) {
+    points.push(sphericalPoint(THREE, meta, 90 - i, longitude, 52000, state.verticalScale));
+  }
+  for (let i = 0; i <= 180; i += 1) {
+    points.push(sphericalPoint(THREE, meta, -90 + i, longitude + 180, 52000, state.verticalScale));
+  }
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({ color, transparent: true, opacity });
+  return new THREE.Line(geometry, material);
+}
+
+function drawMinimap() {
+  if (!flood || !el.minimap) return;
+  const ctx = el.minimap.getContext("2d");
+  const { width, height } = el.minimap;
+  const image = ctx.createImageData(width, height);
+
+  for (let y = 0; y < height; y += 1) {
+    const latitude = 90 - (y / (height - 1)) * 180;
+    for (let x = 0; x < width; x += 1) {
+      const longitude = (x / width) * 360;
+      const h = sampleHeight(meta, heightData, latitude, longitude);
+      const flooded = sampleFloodMask(meta, flood.mask, latitude, longitude);
+      const color = colorTools.terrainColor({
+        height: h,
+        latitude,
+        slope: 0.25,
+        flooded,
+        seaLevel: state.seaLevel,
+        minimumMeters: meta.minimumMeters,
+        maximumMeters: meta.maximumMeters,
+        visualMode: state.visualMode,
+        softShore: state.softShore,
+        snowCaps: state.snowCaps,
+        polarIce: state.polarIce,
+        biomes: state.biomes,
+        ultraCreative: state.ultraCreative,
+        ultraIntensity: state.ultraIntensity,
+        procedural: 0,
+      });
+      const offset = (y * width + x) * 4;
+      image.data[offset] = Math.round(color.r * 255);
+      image.data[offset + 1] = Math.round(color.g * 255);
+      image.data[offset + 2] = Math.round(color.b * 255);
+      image.data[offset + 3] = 255;
+    }
+  }
+
+  minimapBase = image;
+  drawMinimapMarker();
+}
+
+function drawMinimapMarker() {
+  if (!minimapBase) return;
+  const ctx = el.minimap.getContext("2d");
+  ctx.putImageData(minimapBase, 0, 0);
+  drawMinimapRivers(ctx);
+  const x = (mapMarker.longitude / 360) * el.minimap.width;
+  const y = ((90 - mapMarker.latitude) / 180) * el.minimap.height;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(x, y, 5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y);
+  ctx.lineTo(x + 8, y);
+  ctx.moveTo(x, y - 8);
+  ctx.lineTo(x, y + 8);
+  ctx.stroke();
+}
+
+function drawMinimapRivers(ctx) {
+  if (!state.riversVisible || !riverModel.rivers.length) return;
+  ctx.save();
+  ctx.strokeStyle = state.visualMode === "mars" ? "rgba(78, 193, 209, 0.7)" : "rgba(44, 154, 187, 0.72)";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (const river of riverModel.rivers.slice(0, 80)) {
+    ctx.lineWidth = Math.max(0.6, Math.min(2.4, Math.sqrt(river.maxDischarge) * 0.18));
+    ctx.beginPath();
+    let started = false;
+    let lastX = 0;
+    for (const point of river.points) {
+      const x = (point.lon / 360) * el.minimap.width;
+      const y = ((90 - point.lat) / 180) * el.minimap.height;
+      if (!started || Math.abs(x - lastX) > el.minimap.width * 0.5) {
+        ctx.moveTo(x, y);
+        started = true;
+      } else {
+        ctx.lineTo(x, y);
+      }
+      lastX = x;
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function onMinimapClick(event) {
+  const rect = el.minimap.getBoundingClientRect();
+  const longitude = ((event.clientX - rect.left) / rect.width) * 360;
+  const latitude = 90 - ((event.clientY - rect.top) / rect.height) * 180;
+  mapMarker = { latitude, longitude };
+  drawMinimapMarker();
+  const height = sampleHeight(meta, heightData, latitude, longitude);
+  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? "agua" : "seco";
+  el.cursorOutput.textContent = `${latitude.toFixed(2)} deg, ${longitude.toFixed(2)} deg / ${formatMeters(height)} / ${surface}`;
+  focusCamera({ THREE, camera, controls, meta, target: { lat: latitude, lon: longitude, distance: 2.18 } });
+}
+
+function runTour(name) {
+  const tour = {
+    seas: { sea: 3000, target: CAMERA_TARGETS.hellas },
+    volcanoes: { sea: 0, target: CAMERA_TARGETS.olympus, ultra: true },
+    canyons: { sea: 0, target: CAMERA_TARGETS.valles, ultra: true },
+    continents: { sea: 0, target: CAMERA_TARGETS.tharsis },
+  }[name];
+  if (!tour) return;
+  if (tour.ultra) {
+    state.ultraCreative = true;
+    el.ultraToggle.checked = true;
+    state.ultraIntensity = "cinematic";
+    el.ultraButtons.forEach((button) => button.classList.toggle("active", button.dataset.ultraIntensity === "cinematic"));
+    rebuildTerrainMesh();
+    rebuildWaterMesh();
+    rebuildRivers();
+    updateLabels();
+  }
+  focusCamera({ THREE, camera, controls, meta, target: tour.target });
+  setSeaLevel(tour.sea);
+}
+
+function beautyShot() {
+  state.visualMode = "earth";
+  state.ultraCreative = true;
+  state.ultraIntensity = "cinematic";
+  state.snowCaps = true;
+  state.polarIce = true;
+  state.biomes = true;
+  state.autoRotate = false;
+  controls.autoRotate = false;
+  el.autorotateToggle.checked = false;
+  el.ultraToggle.checked = true;
+  el.snowToggle.checked = true;
+  el.polarToggle.checked = true;
+  el.biomeToggle.checked = true;
+  el.visualButtons.forEach((button) => button.classList.toggle("active", button.dataset.visualMode === "earth"));
+  el.ultraButtons.forEach((button) => button.classList.toggle("active", button.dataset.ultraIntensity === "cinematic"));
+  focusCamera({ THREE, camera, controls, meta, target: CAMERA_TARGETS.valles });
+  setSeaLevel(0);
+  rebuildTerrainMesh();
+  rebuildWaterMesh();
+  rebuildRivers();
+  updateLabels();
+  updateAllReadouts();
+}
+
+function makeLabelSprite(text) {
+  const labelCanvas = document.createElement("canvas");
+  labelCanvas.width = 512;
+  labelCanvas.height = 128;
+  const ctx = labelCanvas.getContext("2d");
+  ctx.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
+  ctx.fillStyle = "rgba(7, 8, 10, 0.72)";
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.28)";
+  roundRect(ctx, 18, 28, 476, 64, 14);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "700 30px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 256, 61);
+
+  const texture = new THREE.CanvasTexture(labelCanvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  sprite.scale.set(0.36, 0.09, 1);
+  return sprite;
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
+}
+
+function addStars() {
+  const count = 1600;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+
+  for (let i = 0; i < count; i += 1) {
+    const radius = 28 + Math.random() * 22;
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.acos(Math.random() * 2 - 1);
+    positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+    positions[i * 3 + 1] = radius * Math.cos(phi);
+    positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+
+    const warmth = 0.76 + Math.random() * 0.24;
+    colors[i * 3] = warmth;
+    colors[i * 3 + 1] = warmth * (0.86 + Math.random() * 0.12);
+    colors[i * 3 + 2] = warmth * (0.78 + Math.random() * 0.2);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    size: 0.025,
+    vertexColors: true,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.72,
+  });
+  stars = new THREE.Points(geometry, material);
+  scene.add(stars);
+}
+
+function onPointerMove(event) {
+  if (!terrainMesh || !flood) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+  pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+  raycaster.setFromCamera(pointer, camera);
+  const [hit] = raycaster.intersectObject(terrainMesh, false);
+  if (!hit) return;
+
+  const normal = hit.point.clone().normalize();
+  const latitude = THREE.MathUtils.radToDeg(Math.asin(normal.y));
+  const longitude = (THREE.MathUtils.radToDeg(Math.atan2(normal.z, normal.x)) + 180 + 360) % 360;
+  const height = sampleHeight(meta, heightData, latitude, longitude);
+  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? "agua" : "seco";
+  mapMarker = { latitude, longitude };
+  drawMinimapMarker();
+  el.cursorOutput.textContent = `${latitude.toFixed(2)} deg, ${longitude.toFixed(2)} deg / ${formatMeters(height)} / ${surface}`;
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  updateLabelVisibility();
+  if (stars) stars.rotation.y += 0.00008;
+  renderer.render(scene, camera);
+}
+
+function formatMeters(value) {
+  return `${Math.round(value).toLocaleString("es-ES")} m`;
+}

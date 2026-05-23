@@ -1,0 +1,21 @@
+{
+  "width": 1440,
+  "height": 720,
+  "sampleType": "int16le",
+  "unit": "meter",
+  "source": "NASA PDS MGS-M-MOLA-5-MEGDR-L3-V1.0 MEGT90N000EB.IMG",
+  "sourceResolution": "16 pixels/degree",
+  "derivedResolution": "4 pixels/degree",
+  "minimumMeters": -8038,
+  "maximumMeters": 21124,
+  "meanMeters": -721.11,
+  "longitudeRange": [
+    0,
+    360
+  ],
+  "latitudeRange": [
+    90,
+    -90
+  ],
+  "marsRadiusMeters": 3396000
+}
