@@ -3,10 +3,11 @@ import { OrbitControls } from "../vendor/OrbitControls.js";
 import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
 import { createColorTools } from "./colors.js";
 import { FloodModel } from "./flood.js";
-import { RESOLUTIONS, buildTerrainGeometry, buildWaterGeometry, updateTerrainColors } from "./geometry.js";
+import { RESOLUTIONS, buildTerrainGeometry, updateTerrainColors } from "./geometry.js";
 import { buildRiverGeometry, simulateRivers } from "./rivers.js";
 import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from "./topography.js";
 import { createAtmosphere } from "./atmosphere.js";
+import { createHeightTexture, createWaterMaterial, setWaterPalette } from "./water-shader.js";
 
 const LAKE_THRESHOLD_KM2 = 80000;
 
@@ -70,7 +71,28 @@ const sun = new THREE.DirectionalLight(0xfff3da, 4.3);
 sun.position.set(3.8, 2.6, 2.2);
 scene.add(sun);
 
-const atmosphere = createAtmosphere({ THREE, scene });
+const textureLoader = new THREE.TextureLoader();
+const cloudTexture = textureLoader.load("./data/clouds.jpg");
+cloudTexture.wrapS = THREE.RepeatWrapping;
+cloudTexture.colorSpace = THREE.SRGBColorSpace;
+cloudTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+
+const normalTexture = textureLoader.load("./data/mars-mola-normal-1440x720.png");
+normalTexture.wrapS = THREE.RepeatWrapping;
+normalTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+
+const marsAlbedoTexture = textureLoader.load("./data/mars_albedo.jpg");
+marsAlbedoTexture.wrapS = THREE.RepeatWrapping;
+marsAlbedoTexture.colorSpace = THREE.SRGBColorSpace;
+marsAlbedoTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+
+const starsTexture = textureLoader.load("./data/stars_milky_way.jpg", (tex) => {
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = tex;
+});
+
+const atmosphere = createAtmosphere({ THREE, scene, cloudTexture });
 atmosphere.setSunDirection(sun.position);
 
 const envScene = new THREE.Scene();
@@ -96,25 +118,11 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
   metalness: 0.0,
   envMapIntensity: 0.15,
   flatShading: false,
+  normalMap: normalTexture,
+  normalScale: new THREE.Vector2(0.85, 0.85),
 });
 
-const waterMaterial = new THREE.MeshPhysicalMaterial({
-  vertexColors: true,
-  transparent: true,
-  opacity: 0.55,
-  roughness: 0.06,
-  metalness: 0.0,
-  transmission: 0.18,
-  ior: 1.33,
-  thickness: 0.4,
-  clearcoat: 1.0,
-  clearcoatRoughness: 0.05,
-  reflectivity: 0.55,
-  specularIntensity: 1.0,
-  envMapIntensity: 1.4,
-  depthWrite: false,
-  side: THREE.DoubleSide,
-});
+let waterMaterial = null;
 
 const el = {
   loadState: document.querySelector("#load-state"),
@@ -195,6 +203,10 @@ async function init() {
     poleHeights = { north: topography.northPoleHeight, south: topography.southPoleHeight };
     floodModel = new FloodModel(meta, heightData);
 
+    const heightTexture = createHeightTexture(THREE, meta, heightData);
+    waterMaterial = createWaterMaterial(THREE, { heightTexture, meta });
+    waterMaterial.uniforms.uSunDirection.value.copy(sun.position).normalize();
+
     addStars();
     wireEvents();
     applyShareState();
@@ -256,16 +268,18 @@ function rebuildTerrainMesh() {
 }
 
 function rebuildWaterMesh() {
-  const geometry = buildWaterGeometry({ THREE, meta, heightData, flood, state, colorTools });
-  if (waterMesh) {
-    waterMesh.geometry.dispose();
-    waterMesh.geometry = geometry;
-  } else {
+  if (!waterMaterial) return;
+  waterMaterial.uniforms.uSeaLevel.value = state.seaLevel;
+  setWaterPalette(waterMaterial, state.visualMode);
+  const radius = 1 + ((state.seaLevel + 60) / meta.marsRadiusMeters) * state.verticalScale;
+  if (!waterMesh) {
+    const geometry = new THREE.SphereGeometry(1, 256, 128);
     waterMesh = new THREE.Mesh(geometry, waterMaterial);
     waterMesh.renderOrder = 3;
     scene.add(waterMesh);
   }
-  waterMesh.visible = state.waterVisible && geometry.getIndex().count > 0;
+  waterMesh.scale.setScalar(radius);
+  waterMesh.visible = state.waterVisible;
 }
 
 function rebuildRivers() {

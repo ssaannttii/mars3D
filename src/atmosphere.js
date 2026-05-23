@@ -29,6 +29,7 @@ const ATMOSPHERE_FRAG = `
 `;
 
 const CLOUDS_FRAG = `
+  uniform sampler2D uCloudMap;
   uniform float uTime;
   uniform float uOpacity;
   uniform vec3 uSunDirection;
@@ -37,68 +38,21 @@ const CLOUDS_FRAG = `
   varying vec3 vWorldNormal;
   varying vec3 vWorldPos;
 
-  float hash(vec2 p) {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-  }
-  float vnoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    float a = hash(i);
-    float b = hash(i + vec2(1.0, 0.0));
-    float c = hash(i + vec2(0.0, 1.0));
-    float d = hash(i + vec2(1.0, 1.0));
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-  }
-  float fbm(vec2 p) {
-    float v = 0.0;
-    float a = 0.55;
-    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
-    for (int i = 0; i < 6; i++) {
-      v += a * vnoise(p);
-      p = rot * p * 2.08;
-      a *= 0.5;
-    }
-    return v;
-  }
-
-  vec2 swirl(vec2 p, vec2 center, float strength, float radius) {
-    vec2 d = p - center;
-    float dist = length(d);
-    float t = smoothstep(radius, 0.0, dist) * strength;
-    float c = cos(t);
-    float s = sin(t);
-    return center + mat2(c, -s, s, c) * d;
-  }
-
   void main() {
     vec3 n = normalize(vWorldNormal);
     float lat = asin(clamp(n.y, -1.0, 1.0));
     float lon = atan(n.z, n.x);
-    vec2 uv = vec2(lon * 1.15, lat * 1.6);
-    uv.x += uTime * 0.025;
-
-    vec2 warped = uv;
-    warped = swirl(warped, vec2(1.4, 0.4), 0.9, 0.5);
-    warped = swirl(warped, vec2(-2.1, -0.6), -0.8, 0.55);
-    warped = swirl(warped, vec2(3.2, -0.2), 0.7, 0.45);
-    warped = swirl(warped, vec2(-0.6, 0.9), -0.6, 0.4);
-
-    float band0 = fbm(warped * 1.6);
-    float band1 = fbm(warped * 3.8 + 7.4);
-    float band2 = fbm(uv * 8.5 - 3.1);
-    float base = band0 * 0.45 + band1 * 0.4 + band2 * 0.15;
-
-    float latitudinalBands = 0.55 + 0.4 * sin(lat * 4.5);
-    float itzc = exp(-pow(lat * 2.6, 2.0)) * 0.3;
-    float density = clamp(base * latitudinalBands + itzc - 0.42, 0.0, 1.0);
-    density = pow(density, 1.6);
+    float u = lon / (2.0 * 3.14159265) + 0.5 + uTime * 0.0035;
+    float v = 0.5 - lat / 3.14159265;
+    vec4 sample0 = texture2D(uCloudMap, vec2(u, v));
+    vec4 sample1 = texture2D(uCloudMap, vec2(u * 1.7 + 0.13, v * 1.3 + 0.07));
+    float density = sample0.r * 0.78 + sample1.r * 0.32;
+    density = clamp(pow(density, 1.25) - 0.08, 0.0, 1.0);
 
     float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float lit = 0.32 + sunDot * 1.05;
-    float thickness = density * density;
+    float lit = 0.34 + sunDot * 1.0;
     vec3 col = mix(uShadow, uTint, lit);
-    col = mix(col, uTint * 1.18, thickness * sunDot);
+    col = mix(col, uTint * 1.16, density * sunDot * 0.6);
 
     float alpha = density * uOpacity;
     if (alpha < 0.02) discard;
@@ -106,7 +60,7 @@ const CLOUDS_FRAG = `
   }
 `;
 
-export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
+export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0, cloudTexture = null }) {
   const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.06, 96, 64);
   const haloMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
@@ -126,16 +80,17 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
   halo.renderOrder = 5;
   scene.add(halo);
 
-  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.024, 128, 80);
+  const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.018, 128, 80);
   const cloudMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: CLOUDS_FRAG,
     uniforms: {
+      uCloudMap: { value: cloudTexture },
       uTime: { value: 0 },
-      uOpacity: { value: 0.72 },
+      uOpacity: { value: 0.9 },
       uSunDirection: haloMaterial.uniforms.uSunDirection,
       uTint: { value: new THREE.Color("#ffffff") },
-      uShadow: { value: new THREE.Color("#7a8090") },
+      uShadow: { value: new THREE.Color("#6a7384") },
     },
     transparent: true,
     side: THREE.FrontSide,
@@ -143,7 +98,7 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0 }) {
   });
   const clouds = new THREE.Mesh(cloudGeometry, cloudMaterial);
   clouds.renderOrder = 4;
-  clouds.visible = true;
+  clouds.visible = !!cloudTexture;
   scene.add(clouds);
 
   return {
