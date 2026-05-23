@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Marte MOLA 3D</title>
-    <link rel="stylesheet" href="./src/styles.css?v=26" />
+    <link rel="stylesheet" href="./src/styles.css?v=27" />
     <script type="importmap">
       {
         "imports": {
@@ -72,12 +72,13 @@
           <div class="control-group">
             <div class="control-title">
               <label for="height-scale">Relieve</label>
-              <output id="scale-output" for="height-scale">18x</output>
+              <output id="scale-output" for="height-scale">3x</output>
             </div>
-            <input id="height-scale" type="range" min="1" max="40" value="18" step="1" />
+            <input id="height-scale" type="range" min="1" max="40" value="3" step="1" />
             <div class="row">
               <button id="real-scale" type="button">1x real</button>
-              <button id="visible-scale" type="button">18x visible</button>
+              <button id="visible-scale" type="button">3x natural</button>
+              <button id="dramatic-scale" type="button">18x dramatico</button>
             </div>
           </div>
           <div class="switches compact">
@@ -112,13 +113,13 @@
           <div class="control-group">
             <div class="control-title">
               <span>Detalle</span>
-              <output id="resolution-output">480 x 240</output>
+              <output id="resolution-output">1440 x 720</output>
             </div>
             <div class="segmented" role="group" aria-label="Resolucion de la malla">
               <button type="button" data-resolution="low">Baja</button>
-              <button type="button" data-resolution="medium" class="active">Media</button>
+              <button type="button" data-resolution="medium">Media</button>
               <button type="button" data-resolution="high">Alta</button>
-              <button type="button" data-resolution="ultra">Ultra 1:1</button>
+              <button type="button" data-resolution="ultra" class="active">Ultra 1:1</button>
             </div>
           </div>
           <div class="preset-grid camera-grid" aria-label="Destinos de camara">
@@ -182,6 +183,6 @@
       </section>
     </main>
 
-    <script type="module" src="./src/app.js?v=26"></script>
+    <script type="module" src="./src/app.js?v=27"></script>
   </body>
 </html>

@@ -23,8 +23,8 @@ const PLACES = [
 
 const state = {
   seaLevel: 0,
-  verticalScale: 18,
-  resolution: "medium",
+  verticalScale: 3,
+  resolution: "ultra",
   visualMode: "earth",
   biomes: true,
   ultraCreative: false,
@@ -422,7 +422,9 @@ function wireEvents() {
   el.balanceWater.addEventListener("click", () => void setBalancedSeaLevel());
   el.heightScale.addEventListener("input", (event) => setVerticalScale(event.target.value));
   el.realScale.addEventListener("click", () => setVerticalScale(1));
-  el.visibleScale.addEventListener("click", () => setVerticalScale(18));
+  el.visibleScale.addEventListener("click", () => setVerticalScale(3));
+  const dramatic = document.querySelector("#dramatic-scale");
+  if (dramatic) dramatic.addEventListener("click", () => setVerticalScale(18));
 
   el.waterToggle.addEventListener("change", (event) => {
     state.waterVisible = event.target.checked;
