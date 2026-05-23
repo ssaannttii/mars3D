@@ -1,51 +1,66 @@
 import { clamp, sampleFloodMask, sampleHeight, sphericalPoint, smoothstep } from "./topography.js";
 
-const GRID_WIDTH = 540;
-const GRID_HEIGHT = 270;
-const MAIN_THRESHOLD = 10;
-const TRIBUTARY_THRESHOLD = 3.6;
-const MIN_RIVER_KM = 240;
+const GRID_WIDTH = 1080;
+const GRID_HEIGHT = 540;
+const MAIN_THRESHOLD = 22;
+const TRIBUTARY_THRESHOLD = 8;
+const MIN_RIVER_KM = 220;
+const MAX_RIVERS = 240;
+const LAKE_MIN_CELLS = 28;
+const LAKE_MAX = 60;
+
+let cachedGrid = null;
 
 export function simulateRivers({ meta, heightData, flood, state }) {
-  if (!state.riversVisible) return emptyRivers();
+  if (!state.riversVisible) return emptyResult();
 
-  const total = GRID_WIDTH * GRID_HEIGHT;
-  const heights = new Float32Array(total);
-  const wet = new Uint8Array(total);
-  const ocean = new Uint8Array(total);
-
-  for (let y = 0; y < GRID_HEIGHT; y += 1) {
-    const latitude = rowLatitude(y);
-    for (let x = 0; x < GRID_WIDTH; x += 1) {
-      const i = index(x, y);
-      const longitude = colLongitude(x);
-      heights[i] = sampleHeight(meta, heightData, latitude, longitude);
-      wet[i] = sampleFloodMask(meta, flood.mask, latitude, longitude) ? 1 : 0;
-    }
-  }
-
+  const grid = ensureGrid(meta, heightData);
+  const ocean = new Uint8Array(grid.total);
+  const wet = new Uint8Array(grid.total);
+  buildWetMask(meta, flood, grid, wet);
   markLargestWaterBody(wet, ocean);
-  const { filled, oceanDistance } = priorityFloodToOcean(heights, ocean);
-  const flowTo = routeFlowsToOcean(heights, filled, ocean);
-  const slopes = makeGridSlopes(heights);
-  const source = makeMeltSources(heights, slopes, ocean, wet, state);
+
+  const { filled, oceanDistance } = priorityFloodToOcean(grid.heights, ocean);
+  const flowTo = routeFlowsToOcean(grid.heights, filled, ocean);
+  const slopes = grid.slopes;
+  const source = makeMeltSources(grid.heights, slopes, ocean, wet, state, grid);
   const discharge = accumulateDischarge(source, filled, flowTo);
-  const rivers = extractRivers({ heights, filled, discharge, flowTo, ocean, wet, oceanDistance, state });
+  const lakes = state.tributariesVisible ? extractLakes(grid.heights, filled, ocean, discharge) : [];
+  const rivers = extractRivers({
+    heights: grid.heights,
+    filled,
+    discharge,
+    flowTo,
+    ocean,
+    wet,
+    oceanDistance,
+    state,
+    grid,
+  });
+  const deltas = buildDeltas(rivers, grid, ocean, filled);
 
   return {
     rivers,
-    stats: summarizeRivers(rivers),
+    lakes,
+    deltas,
+    stats: summarize(rivers, lakes),
   };
 }
 
-export function buildRiverGeometry({ THREE, meta, rivers, state, colorTools }) {
+export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, colorTools }) {
   const positions = [];
   const colors = [];
   const indices = [];
   const baseColor = colorTools.waterColor({ depth: 1600, visualMode: state.visualMode }).clone();
 
-  for (const river of rivers) {
+  for (const river of rivers || []) {
     appendRiverRibbon({ THREE, meta, river, state, positions, colors, indices, baseColor, colorTools });
+  }
+  for (const delta of deltas || []) {
+    appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools });
+  }
+  for (const lake of lakes || []) {
+    appendLake({ THREE, meta, lake, state, positions, colors, indices, colorTools });
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -54,6 +69,40 @@ export function buildRiverGeometry({ THREE, meta, rivers, state, colorTools }) {
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function ensureGrid(meta, heightData) {
+  if (cachedGrid && cachedGrid.meta === meta) return cachedGrid;
+  const total = GRID_WIDTH * GRID_HEIGHT;
+  const heights = new Float32Array(total);
+  const slopes = new Float32Array(total);
+
+  for (let y = 0; y < GRID_HEIGHT; y += 1) {
+    const latitude = rowLatitude(y);
+    for (let x = 0; x < GRID_WIDTH; x += 1) {
+      heights[index(x, y)] = sampleHeight(meta, heightData, latitude, colLongitude(x));
+    }
+  }
+  for (let y = 0; y < GRID_HEIGHT; y += 1) {
+    for (let x = 0; x < GRID_WIDTH; x += 1) {
+      const left = heights[index((x + GRID_WIDTH - 1) % GRID_WIDTH, y)];
+      const right = heights[index((x + 1) % GRID_WIDTH, y)];
+      const up = heights[index(x, Math.max(0, y - 1))];
+      const down = heights[index(x, Math.min(GRID_HEIGHT - 1, y + 1))];
+      slopes[index(x, y)] = clamp(Math.max(Math.abs(right - left), Math.abs(down - up)) / 6200, 0, 1);
+    }
+  }
+  cachedGrid = { meta, heights, slopes, total };
+  return cachedGrid;
+}
+
+function buildWetMask(meta, flood, grid, wet) {
+  for (let y = 0; y < GRID_HEIGHT; y += 1) {
+    const latitude = rowLatitude(y);
+    for (let x = 0; x < GRID_WIDTH; x += 1) {
+      wet[index(x, y)] = sampleFloodMask(meta, flood.mask, latitude, colLongitude(x)) ? 1 : 0;
+    }
+  }
 }
 
 function priorityFloodToOcean(heights, ocean) {
@@ -78,7 +127,7 @@ function priorityFloodToOcean(heights, ocean) {
     forEachNeighbor(x, y, (next) => {
       if (visited[next]) return;
       visited[next] = 1;
-      filled[next] = Math.max(heights[next], filled[current] + 0.03);
+      filled[next] = Math.max(heights[next], filled[current] + 0.02);
       oceanDistance[next] = Math.min(65535, oceanDistance[current] + 1);
       heap.push(next, filled[next]);
     });
@@ -101,9 +150,9 @@ function routeFlowsToOcean(heights, filled, ocean) {
       const spillDrop = filled[i] - filled[next];
       if (spillDrop < -0.001) return;
       const reliefDrop = heights[i] - heights[next];
-      const diagonalPenalty = isDiagonal(i, next) ? 0.018 : 0;
-      const waterBonus = ocean[next] ? -0.45 : 0;
-      const score = filled[next] - Math.max(0, reliefDrop) * 0.0009 + diagonalPenalty + waterBonus + hashCell(next) * 0.006;
+      const diagonalPenalty = isDiagonal(i, next) ? 0.014 : 0;
+      const waterBonus = ocean[next] ? -0.55 : 0;
+      const score = filled[next] - Math.max(0, reliefDrop) * 0.0011 + diagonalPenalty + waterBonus + hashCell(next) * 0.004;
       if (score < bestScore) {
         bestScore = score;
         best = next;
@@ -120,35 +169,119 @@ function accumulateDischarge(source, filled, flowTo) {
   const discharge = new Float32Array(source);
   for (const i of order) {
     const next = flowTo[i];
-    if (next >= 0) discharge[next] += discharge[i] * 0.992;
+    if (next >= 0) discharge[next] += discharge[i] * 0.995;
   }
   return discharge;
 }
 
-function extractRivers({ heights, filled, discharge, flowTo, ocean, wet, oceanDistance, state }) {
+function makeMeltSources(heights, slopes, ocean, wet, state, grid) {
+  const source = new Float32Array(heights.length);
+  for (let y = 0; y < GRID_HEIGHT; y += 1) {
+    const latitude = rowLatitude(y);
+    for (let x = 0; x < GRID_WIDTH; x += 1) {
+      const i = index(x, y);
+      if (ocean[i] || wet[i]) continue;
+      const height = heights[i];
+      const slope = slopes[i];
+      const snowLine = state.snowCaps ? 5400 : 8200;
+      const snow = smoothstep(snowLine, 13500, height);
+      const polar = state.polarIce ? smoothstep(66, 88, Math.abs(latitude)) * smoothstep(-1800, 6200, height) * 0.32 : 0;
+      const orographic = smoothstep(1500, 9500, height) * (0.12 + slope * 0.38);
+      const temperate = 1 - smoothstep(42, 84, Math.abs(latitude));
+      source[i] = (snow * (2.0 + slope * 1.5) + polar + orographic * temperate) * 1.7;
+    }
+  }
+  return source;
+}
+
+function extractLakes(heights, filled, ocean, discharge) {
+  const lakes = [];
+  const visited = new Uint8Array(heights.length);
+  for (let i = 0; i < heights.length; i += 1) {
+    if (visited[i] || ocean[i]) continue;
+    const depth = filled[i] - heights[i];
+    if (depth < 25) continue;
+    if (discharge[i] < 6) continue;
+    const lake = floodLake(i, heights, filled, ocean, visited);
+    if (lake.cells.length >= LAKE_MIN_CELLS) {
+      lakes.push(lake);
+      if (lakes.length >= LAKE_MAX) break;
+    }
+  }
+  lakes.sort((a, b) => b.cells.length - a.cells.length);
+  return lakes.slice(0, LAKE_MAX);
+}
+
+function floodLake(start, heights, filled, ocean, visited) {
+  const cells = [];
+  const queue = [start];
+  visited[start] = 1;
+  const surface = filled[start];
+  while (queue.length > 0) {
+    const current = queue.pop();
+    cells.push(current);
+    const { x, y } = xy(current);
+    forEachNeighbor4(x, y, (next) => {
+      if (visited[next] || ocean[next]) return;
+      const depth = filled[next] - heights[next];
+      if (depth < 8) return;
+      if (Math.abs(filled[next] - surface) > 35) return;
+      visited[next] = 1;
+      queue.push(next);
+    });
+  }
+  let sumLat = 0;
+  let sumLon = 0;
+  let lonRef = null;
+  for (const cell of cells) {
+    const { x, y } = xy(cell);
+    sumLat += rowLatitude(y);
+    const lon = colLongitude(x);
+    if (lonRef === null) lonRef = lon;
+    let delta = lon - lonRef;
+    if (delta > 180) delta -= 360;
+    if (delta < -180) delta += 360;
+    sumLon += lonRef + delta;
+  }
+  return {
+    cells,
+    centerLat: sumLat / cells.length,
+    centerLon: wrapLongitude(sumLon / cells.length),
+    surface,
+  };
+}
+
+function extractRivers({ heights, filled, discharge, flowTo, ocean, wet, oceanDistance, state, grid }) {
   const used = new Uint8Array(heights.length);
   const threshold = state.tributariesVisible ? TRIBUTARY_THRESHOLD : MAIN_THRESHOLD;
-  const starts = Array.from({ length: heights.length }, (_, i) => i)
-    .filter(
-      (i) =>
-        !ocean[i] &&
-        !wet[i] &&
-        discharge[i] >= threshold &&
-        oceanDistance[i] > 3 &&
-        isChannelHead(i, discharge, flowTo, threshold),
-    )
-    .sort((a, b) => discharge[b] - discharge[a]);
+  const starts = [];
+  for (let i = 0; i < heights.length; i += 1) {
+    if (ocean[i] || wet[i]) continue;
+    if (discharge[i] < threshold) continue;
+    if (oceanDistance[i] <= 3) continue;
+    if (!isChannelHead(i, discharge, flowTo, threshold)) continue;
+    starts.push(i);
+  }
+  starts.sort((a, b) => discharge[b] - discharge[a]);
 
   const rivers = [];
   for (const start of starts) {
     if (used[start]) continue;
-    const river = traceRiver(start, { heights, filled, discharge, flowTo, ocean, used, includeTributaries: state.tributariesVisible });
+    const river = traceRiver(start, {
+      heights,
+      filled,
+      discharge,
+      flowTo,
+      ocean,
+      used,
+      includeTributaries: state.tributariesVisible,
+    });
     if (river && river.lengthKm >= MIN_RIVER_KM) rivers.push(river);
-    if (rivers.length >= 150) break;
+    if (rivers.length >= MAX_RIVERS) break;
   }
 
   rivers.sort((a, b) => b.maxDischarge - a.maxDischarge);
-  return rivers.slice(0, state.tributariesVisible ? 100 : 32);
+  return rivers.slice(0, state.tributariesVisible ? 140 : 48);
 }
 
 function traceRiver(start, context) {
@@ -159,8 +292,9 @@ function traceRiver(start, context) {
   let lengthKm = 0;
   let maxDischarge = discharge[start];
   let outlet = false;
+  let outletCell = -1;
 
-  for (let step = 0; step < 1400; step += 1) {
+  for (let step = 0; step < 2200; step += 1) {
     if (current < 0 || seen.has(current)) break;
     seen.add(current);
     const { x, y } = xy(current);
@@ -187,6 +321,7 @@ function traceRiver(start, context) {
         discharge: discharge[current],
       });
       outlet = true;
+      outletCell = next;
       break;
     }
     current = next;
@@ -195,7 +330,7 @@ function traceRiver(start, context) {
   if (!outlet || points.length < 7) return null;
   const natural = naturalizeRiverPath(points, maxDischarge, hash2(xy(start).x, xy(start).y));
   const smooth = chaikin(natural, 3);
-  const estimatedWidthKm = 0.12 + Math.sqrt(maxDischarge) * 0.62;
+  const estimatedWidthKm = hackWidthKm(maxDischarge);
   const avgDischarge = points.reduce((sum, point) => sum + point.discharge, 0) / points.length;
   return {
     points: smooth,
@@ -204,8 +339,52 @@ function traceRiver(start, context) {
     avgDischarge,
     estimatedWidthKm,
     outlet,
+    outletCell,
     seed: hash2(xy(start).x, xy(start).y) * Math.PI * 2,
   };
+}
+
+function hackWidthKm(maxDischarge) {
+  return clamp(0.08 + Math.pow(Math.max(maxDischarge, 1), 0.55) * 0.18, 0.08, 9);
+}
+
+function buildDeltas(rivers, grid, ocean, filled) {
+  const deltas = [];
+  for (const river of rivers) {
+    if (river.maxDischarge < 80 || river.outletCell < 0) continue;
+    const { x, y } = xy(river.outletCell);
+    const last = river.points[river.points.length - 1];
+    const prev = river.points[Math.max(0, river.points.length - 6)];
+    const dLat = last.lat - prev.lat;
+    const dLon = normalizeDeltaLongitude(last.lon - prev.lon);
+    const length = Math.hypot(dLat, dLon);
+    if (length < 0.0001) continue;
+    const baseDir = { lat: dLat / length, lon: dLon / length };
+
+    const radius = clamp(0.5 + Math.sqrt(river.maxDischarge) * 0.085, 0.4, 3.5);
+    const fingerCount = 3 + Math.min(5, Math.floor(Math.sqrt(river.maxDischarge) * 0.22));
+    const fingers = [];
+    for (let f = 0; f < fingerCount; f += 1) {
+      const spread = (f - (fingerCount - 1) / 2) / Math.max(1, fingerCount - 1);
+      const angle = spread * 0.95;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const fingerDir = {
+        lat: baseDir.lat * cos - baseDir.lon * sin,
+        lon: baseDir.lat * sin + baseDir.lon * cos,
+      };
+      const fingerLength = radius * (0.55 + Math.random() * 0.55);
+      fingers.push({
+        baseLat: last.lat,
+        baseLon: last.lon,
+        tipLat: clamp(last.lat + fingerDir.lat * fingerLength, -89, 89),
+        tipLon: wrapLongitude(last.lon + fingerDir.lon * fingerLength),
+        widthKm: river.estimatedWidthKm * (0.4 + 0.3 * (1 - Math.abs(spread))),
+      });
+    }
+    deltas.push({ fingers, color: river.maxDischarge });
+  }
+  return deltas;
 }
 
 function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indices, baseColor, colorTools }) {
@@ -222,10 +401,11 @@ function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indic
     const normal = center.clone().normalize();
     const side = new THREE.Vector3().crossVectors(normal, tangent).normalize();
     const progress = i / Math.max(1, river.points.length - 1);
-    const sourceFade = smoothstep(0, 0.055, progress);
-    const mouthFade = 1 - smoothstep(0.88, 1, progress);
-    const width = riverWidthWorld(point.discharge) * sourceFade * mouthFade;
-    const meander = Math.sin(progress * Math.PI * 8.0 + river.seed) * width * 0.18 + Math.sin(progress * Math.PI * 17.0 + river.seed * 0.37) * width * 0.07;
+    const sourceFade = smoothstep(0, 0.05, progress);
+    const mouthFade = 1 - smoothstep(0.92, 1, progress);
+    const widthGrowth = 0.4 + 0.6 * progress;
+    const width = riverWidthWorld(point.discharge) * sourceFade * mouthFade * widthGrowth;
+    const meander = Math.sin(progress * Math.PI * 7.0 + river.seed) * width * 0.18 + Math.sin(progress * Math.PI * 16.0 + river.seed * 0.37) * width * 0.07;
     center.addScaledVector(side, meander);
 
     const left = center.clone().addScaledVector(side, width);
@@ -234,8 +414,8 @@ function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indic
     positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
 
     const t = clamp(point.discharge / Math.max(river.maxDischarge, 1), 0, 1);
-    const depth = 420 + Math.sqrt(point.discharge) * 260;
-    const merge = smoothstep(0.82, 1, progress);
+    const depth = 360 + Math.sqrt(point.discharge) * 280;
+    const merge = smoothstep(0.85, 1, progress);
     const waterColor = colorTools.waterColor({ depth, visualMode: state.visualMode }).clone();
     const outletColor = colorTools.waterColor({ depth: Math.max(state.seaLevel - point.height, 0), visualMode: state.visualMode }).clone();
     const color = baseColor.clone().lerp(waterColor, 0.82 + t * 0.12).lerp(outletColor, merge);
@@ -248,42 +428,76 @@ function appendRiverRibbon({ THREE, meta, river, state, positions, colors, indic
   }
 }
 
+function appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools }) {
+  for (const finger of delta.fingers) {
+    const segments = 6;
+    for (let s = 0; s <= segments; s += 1) {
+      const t = s / segments;
+      const lat = finger.baseLat + (finger.tipLat - finger.baseLat) * t;
+      let lonDelta = finger.tipLon - finger.baseLon;
+      if (lonDelta > 180) lonDelta -= 360;
+      if (lonDelta < -180) lonDelta += 360;
+      const lon = wrapLongitude(finger.baseLon + lonDelta * t);
+      const elev = state.seaLevel + 40;
+      const center = sphericalPoint(THREE, meta, lat, lon, elev, state.verticalScale);
+      const next = sphericalPoint(THREE, meta, lat + 0.02, lon, elev, state.verticalScale);
+      const tangent = next.sub(center).normalize();
+      const normal = center.clone().normalize();
+      const side = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+      const width = (finger.widthKm / 3396) * (1 + t * 1.4) * 0.012;
+      const left = center.clone().addScaledVector(side, width);
+      const right = center.clone().addScaledVector(side, -width);
+      const base = positions.length / 3;
+      positions.push(left.x, left.y, left.z, right.x, right.y, right.z);
+      const color = colorTools.waterColor({ depth: 600 * (1 - t), visualMode: state.visualMode });
+      color.toArray(colors, colors.length);
+      color.toArray(colors, colors.length);
+      if (s > 0) {
+        indices.push(base - 2, base - 1, base, base, base - 1, base + 1);
+      }
+    }
+  }
+}
+
+function appendLake({ THREE, meta, lake, state, positions, colors, indices, colorTools }) {
+  const cells = lake.cells;
+  if (cells.length < 6) return;
+  const radiusKm = Math.sqrt(cells.length) * 11.5;
+  const radius = radiusKm / 3396;
+  const centerColor = colorTools.waterColor({ depth: 800, visualMode: state.visualMode });
+
+  const elev = lake.surface + 55;
+  const center = sphericalPoint(THREE, meta, lake.centerLat, lake.centerLon, elev, state.verticalScale);
+  const normal = center.clone().normalize();
+  const tmp = Math.abs(normal.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+  const tangent = new THREE.Vector3().crossVectors(normal, tmp).normalize();
+  const bitangent = new THREE.Vector3().crossVectors(normal, tangent).normalize();
+
+  const baseIndex = positions.length / 3;
+  positions.push(center.x, center.y, center.z);
+  centerColor.toArray(colors, colors.length);
+
+  const segments = 22;
+  for (let i = 0; i < segments; i += 1) {
+    const angle = (i / segments) * Math.PI * 2;
+    const wobble = 0.78 + 0.22 * Math.sin(angle * 3 + lake.centerLon);
+    const px = Math.cos(angle) * radius * wobble;
+    const py = Math.sin(angle) * radius * wobble;
+    const point = center.clone()
+      .addScaledVector(tangent, px)
+      .addScaledVector(bitangent, py);
+    positions.push(point.x, point.y, point.z);
+    centerColor.toArray(colors, colors.length);
+  }
+  for (let i = 0; i < segments; i += 1) {
+    const a = baseIndex + 1 + i;
+    const b = baseIndex + 1 + ((i + 1) % segments);
+    indices.push(baseIndex, a, b);
+  }
+}
+
 function displayRiverHeight(point) {
-  return Math.max(point.height, point.filled - 35) + 185;
-}
-
-function makeMeltSources(heights, slopes, ocean, wet, state) {
-  const source = new Float32Array(heights.length);
-  for (let y = 0; y < GRID_HEIGHT; y += 1) {
-    const latitude = rowLatitude(y);
-    for (let x = 0; x < GRID_WIDTH; x += 1) {
-      const i = index(x, y);
-      if (ocean[i] || wet[i]) continue;
-      const height = heights[i];
-      const slope = slopes[i];
-      const snowLine = state.snowCaps ? 5600 : 8200;
-      const snow = smoothstep(snowLine, 13500, height);
-      const polar = state.polarIce ? smoothstep(68, 88, Math.abs(latitude)) * smoothstep(-1800, 6200, height) * 0.3 : 0;
-      const orographic = smoothstep(1800, 9800, height) * (0.1 + slope * 0.36);
-      const temperate = 1 - smoothstep(40, 82, Math.abs(latitude));
-      source[i] = (snow * (1.8 + slope * 1.4) + polar + orographic * temperate) * 1.55;
-    }
-  }
-  return source;
-}
-
-function makeGridSlopes(heights) {
-  const slopes = new Float32Array(heights.length);
-  for (let y = 0; y < GRID_HEIGHT; y += 1) {
-    for (let x = 0; x < GRID_WIDTH; x += 1) {
-      const left = heights[index((x + GRID_WIDTH - 1) % GRID_WIDTH, y)];
-      const right = heights[index((x + 1) % GRID_WIDTH, y)];
-      const up = heights[index(x, Math.max(0, y - 1))];
-      const down = heights[index(x, Math.min(GRID_HEIGHT - 1, y + 1))];
-      slopes[index(x, y)] = clamp(Math.max(Math.abs(right - left), Math.abs(down - up)) / 6200, 0, 1);
-    }
-  }
-  return slopes;
+  return Math.max(point.height, point.filled - 30) + 150;
 }
 
 function markLargestWaterBody(wet, ocean) {
@@ -360,7 +574,7 @@ function naturalizeRiverPath(points, maxDischarge, seed01) {
     const localDrop = Math.abs(next.filled - prev.filled);
     const lowSlope = 1 - smoothstep(180, 1800, localDrop);
     const dischargeShape = clamp(Math.sqrt(point.discharge) / Math.sqrt(Math.max(maxDischarge, 1)), 0.25, 1);
-    const amplitude = clamp((0.035 + Math.sqrt(maxDischarge) * 0.004) * (0.4 + lowSlope * 0.95) * dischargeShape, 0.025, 0.34);
+    const amplitude = clamp((0.028 + Math.sqrt(maxDischarge) * 0.0028) * (0.4 + lowSlope * 0.95) * dischargeShape, 0.018, 0.24);
     const wave =
       Math.sin(progress * Math.PI * (4.5 + seed01 * 4.5) + seed) * 0.72 +
       Math.sin(progress * Math.PI * (11.0 + seed01 * 3.0) + seed * 0.31) * 0.28;
@@ -393,13 +607,14 @@ function normalizeDeltaLongitude(delta) {
   return delta;
 }
 
-function summarizeRivers(rivers) {
-  if (rivers.length === 0) return { count: 0, longestKm: 0, widestKm: 0, outletCount: 0 };
+function summarize(rivers, lakes) {
+  if (rivers.length === 0) return { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: lakes.length };
   return {
     count: rivers.length,
     longestKm: Math.max(...rivers.map((river) => river.lengthKm)),
     widestKm: Math.max(...rivers.map((river) => river.estimatedWidthKm)),
     outletCount: rivers.filter((river) => river.outlet).length,
+    lakeCount: lakes.length,
   };
 }
 
@@ -414,7 +629,7 @@ function cellDistanceKm(a, b) {
 }
 
 function riverWidthWorld(discharge) {
-  return clamp(0.00065 + Math.sqrt(discharge) * 0.00028, 0.0009, 0.0052);
+  return clamp(0.0006 + Math.sqrt(discharge) * 0.00024, 0.0008, 0.0055);
 }
 
 function forEachNeighbor(x, y, visit) {
@@ -473,8 +688,13 @@ function wrapLongitude(longitude) {
   return (longitude + 360) % 360;
 }
 
-function emptyRivers() {
-  return { rivers: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0 } };
+function emptyResult() {
+  return {
+    rivers: [],
+    lakes: [],
+    deltas: [],
+    stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: 0 },
+  };
 }
 
 class MinHeap {

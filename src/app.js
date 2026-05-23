@@ -177,7 +177,7 @@ let flood;
 let terrainMesh;
 let waterMesh;
 let riverMesh;
-let riverModel = { rivers: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0 } };
+let riverModel = { rivers: [], lakes: [], deltas: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: 0 } };
 let stars;
 let floodToken = 0;
 let mapMarker = { latitude: 0, longitude: 0 };
@@ -267,7 +267,15 @@ function rebuildWaterMesh() {
 
 function rebuildRivers() {
   riverModel = simulateRivers({ meta, heightData, flood, state });
-  const geometry = buildRiverGeometry({ THREE, meta, rivers: riverModel.rivers, state, colorTools });
+  const geometry = buildRiverGeometry({
+    THREE,
+    meta,
+    rivers: riverModel.rivers,
+    lakes: riverModel.lakes,
+    deltas: riverModel.deltas,
+    state,
+    colorTools,
+  });
   if (riverMesh) {
     riverMesh.geometry.dispose();
     riverMesh.geometry = geometry;
@@ -326,7 +334,8 @@ function formatArea(value) {
 
 function formatRiverStats(stats) {
   if (!stats.count) return "sin cauces";
-  return `${stats.count} rios / ${Math.round(stats.longestKm).toLocaleString("es-ES")} km / ${stats.widestKm.toFixed(1)} km`;
+  const lakes = stats.lakeCount ? ` / ${stats.lakeCount} lagos` : "";
+  return `${stats.count} rios / ${Math.round(stats.longestKm).toLocaleString("es-ES")} km${lakes}`;
 }
 
 function setSeaLevel(value) {
