@@ -147,6 +147,56 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
   map: detailTexture,
 });
 
+const terrainUniforms = {
+  uCloudMap: { value: cloudTexture },
+  uSunDirection: { value: new THREE.Vector3(3.8, 2.6, 2.2).normalize() },
+  uCloudShadow: { value: 0.42 },
+  uCloudOffset: { value: new THREE.Vector2(0, 0) },
+};
+terrainMaterial.onBeforeCompile = (shader) => {
+  shader.uniforms.uCloudMap = terrainUniforms.uCloudMap;
+  shader.uniforms.uSunDirection = terrainUniforms.uSunDirection;
+  shader.uniforms.uCloudShadow = terrainUniforms.uCloudShadow;
+  shader.uniforms.uCloudOffset = terrainUniforms.uCloudOffset;
+  shader.vertexShader = shader.vertexShader
+    .replace(
+      "#include <common>",
+      `#include <common>
+       varying vec3 vTerrainNormalW;`,
+    )
+    .replace(
+      "#include <fog_vertex>",
+      `#include <fog_vertex>
+       vTerrainNormalW = normalize(mat3(modelMatrix) * normal);`,
+    );
+  shader.fragmentShader = shader.fragmentShader
+    .replace(
+      "#include <common>",
+      `#include <common>
+       uniform sampler2D uCloudMap;
+       uniform vec3 uSunDirection;
+       uniform float uCloudShadow;
+       uniform vec2 uCloudOffset;
+       varying vec3 vTerrainNormalW;`,
+    )
+    .replace(
+      "#include <dithering_fragment>",
+      `#include <dithering_fragment>
+       vec3 nW = normalize(vTerrainNormalW);
+       vec3 sunDir = normalize(uSunDirection);
+       float sunDot = clamp(dot(nW, sunDir), 0.0, 1.0);
+       vec3 sample_pos = nW + sunDir * 0.08;
+       sample_pos = normalize(sample_pos);
+       float lat = asin(clamp(sample_pos.y, -1.0, 1.0));
+       float lon = atan(sample_pos.z, sample_pos.x);
+       vec2 cuv = vec2(lon / (2.0 * 3.14159265) + 0.5 + uCloudOffset.x, 0.5 - lat / 3.14159265);
+       float cloud = texture2D(uCloudMap, cuv).r;
+       cloud = clamp(cloud - 0.05, 0.0, 1.0);
+       float shadow = 1.0 - cloud * uCloudShadow * sunDot;
+       gl_FragColor.rgb *= shadow;`,
+    );
+};
+
 let waterMaterial = null;
 
 const el = {
@@ -963,6 +1013,9 @@ function animate() {
   if (stars) stars.rotation.y += 0.00008;
   atmosphere.tick(dt);
   if (waterMaterial) waterMaterial.uniforms.uTime.value += dt;
+  if (atmosphere.clouds) {
+    terrainUniforms.uCloudOffset.value.x = -atmosphere.clouds.rotation.y / (2 * Math.PI);
+  }
   renderer.render(scene, camera);
 }
 
