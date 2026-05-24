@@ -13,6 +13,7 @@ import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from ".
 import { createAtmosphere } from "./atmosphere.js";
 import { applyToDom, getLang, localeForNumbers, onLangChange, setLang, t } from "./i18n.js";
 import { createHeightTexture, createWaterMaterial, setWaterPalette } from "./water-shader.js";
+import { COMPARISONS, buildComparisonOverlay, buildComparisonStats } from "./comparisons.js";
 
 const LAKE_THRESHOLD_KM2 = 80000;
 
@@ -301,6 +302,8 @@ let flood;
 let terrainMesh;
 let waterMesh;
 let riverLines;
+let comparisonOverlay = null;
+let activeComparison = null;
 let riverModel = { rivers: [], lakes: [], deltas: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: 0 } };
 let stars;
 let floodToken = 0;
@@ -698,6 +701,9 @@ function wireEvents() {
   el.beautyShot.addEventListener("click", () => beautyShot());
   if (el.timelapseButton) el.timelapseButton.addEventListener("click", () => runSeaTimelapse());
   if (el.shareButton) el.shareButton.addEventListener("click", () => copyShareLink());
+  document.querySelectorAll("[data-comparison]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleComparison(btn.dataset.comparison));
+  });
   if (el.iceExtent) {
     el.iceExtent.addEventListener("input", (event) => {
       state.iceExtent = Number(event.target.value) / 100;
@@ -1130,6 +1136,47 @@ function applyShareState() {
     if ([x, y, z].every(Number.isFinite)) camera.position.set(x, y, z);
   }
   syncControlsToState();
+}
+
+function toggleComparison(key) {
+  if (activeComparison === key) {
+    disposeComparison();
+    activeComparison = null;
+    el.cursorOutput.textContent = t("stat.cursorHint");
+    return;
+  }
+  disposeComparison();
+  const comparison = COMPARISONS[key];
+  if (!comparison) return;
+  activeComparison = key;
+  const baseHeight = sampleHeight(meta, heightData, comparison.centerLat, comparison.centerLon);
+  comparisonOverlay = buildComparisonOverlay({
+    THREE,
+    meta,
+    state,
+    comparison,
+    baseHeight,
+  });
+  comparisonOverlay.renderOrder = 6;
+  scene.add(comparisonOverlay);
+  focusCamera({
+    THREE,
+    camera,
+    controls,
+    meta,
+    target: { lat: comparison.centerLat, lon: comparison.centerLon, distance: 2.25 },
+  });
+  el.cursorOutput.textContent = buildComparisonStats(comparison, getLang());
+}
+
+function disposeComparison() {
+  if (!comparisonOverlay) return;
+  scene.remove(comparisonOverlay);
+  comparisonOverlay.traverse((obj) => {
+    if (obj.geometry) obj.geometry.dispose();
+    if (obj.material) obj.material.dispose();
+  });
+  comparisonOverlay = null;
 }
 
 function syncControlsToState() {
