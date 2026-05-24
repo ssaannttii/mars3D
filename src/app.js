@@ -446,11 +446,36 @@ function rebuildRivers() {
     riverLines.geometry.dispose();
     riverLines.geometry = lineGeometry;
   } else {
-    const lineMaterial = new THREE.LineBasicMaterial({
+    const lineMaterial = new THREE.ShaderMaterial({
+      uniforms: {
+        uSunDirection: { value: new THREE.Vector3().copy(sun.position).normalize() },
+        uOpacity: { value: 0.92 },
+      },
+      vertexShader: `
+        varying vec3 vColor;
+        varying vec3 vWorldNormal;
+        void main() {
+          vColor = color;
+          vWorldNormal = normalize(mat3(modelMatrix) * normalize(position));
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+      `,
+      fragmentShader: `
+        uniform vec3 uSunDirection;
+        uniform float uOpacity;
+        varying vec3 vColor;
+        varying vec3 vWorldNormal;
+        void main() {
+          float sunDotRaw = dot(normalize(uSunDirection), normalize(vWorldNormal));
+          float dayMix = smoothstep(-0.15, 0.18, sunDotRaw);
+          float diffuse = 0.08 + max(sunDotRaw, 0.0) * 0.92;
+          vec3 night = vColor * vec3(0.18, 0.22, 0.32);
+          vec3 col = mix(night, vColor * diffuse, dayMix);
+          gl_FragColor = vec4(col, uOpacity * mix(0.45, 1.0, dayMix));
+        }
+      `,
       vertexColors: true,
       transparent: true,
-      opacity: 0.92,
-      linewidth: 1,
       depthWrite: false,
       depthTest: true,
     });

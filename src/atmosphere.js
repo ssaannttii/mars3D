@@ -71,12 +71,15 @@ const CLOUDS_FRAG = `
     float density = sample0.r * 0.7 + sample1.r * 0.3 + sample2.r * 0.18;
     density = clamp(pow(density, 1.0) - 0.05, 0.0, 1.0);
 
-    float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float lit = 0.4 + sunDot * 1.25;
+    float sunDotRaw = dot(normalize(uSunDirection), n);
+    float sunDot = clamp(sunDotRaw, 0.0, 1.0);
+    float dayMix = smoothstep(-0.15, 0.18, sunDotRaw);
+    float lit = 0.06 + sunDot * 1.32;
     vec3 col = mix(uShadow, uTint, lit);
     col = mix(col, uTint * 1.3, density * sunDot * 0.8);
+    col *= mix(vec3(0.18, 0.22, 0.32), vec3(1.0), dayMix);
 
-    float alpha = density * uOpacity;
+    float alpha = density * uOpacity * mix(0.3, 1.0, dayMix);
     if (alpha < 0.02) discard;
     gl_FragColor = vec4(col, alpha);
   }
