@@ -367,3 +367,34 @@ button.active {
     display: none;
   }
 }
+
+/* i18n toggle + minimize panel */
+.brand-meta { display: flex; align-items: center; gap: 8px; }
+.brand-meta select {
+  background: rgba(255,255,255,0.06);
+  color: #f4efe8;
+  border: 1px solid rgba(255,255,255,0.12);
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+#panel-toggle {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  z-index: 30;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(20, 22, 28, 0.85);
+  border: 1px solid rgba(255,255,255,0.18);
+  color: #f4efe8;
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.panel.controls.minimized { display: none; }
+

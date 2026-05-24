@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Marte MOLA 3D</title>
-    <link rel="stylesheet" href="./src/styles.css?v=31" />
+    <title>Mars MOLA 3D</title>
+    <link rel="stylesheet" href="./src/styles.css?v=32" />
     <script type="importmap">
       {
         "imports": {
@@ -15,55 +15,63 @@
   </head>
   <body>
     <main id="app">
-      <canvas id="scene" aria-label="Modelo 3D de Marte con elevacion MOLA"></canvas>
+      <canvas id="scene" aria-label="MOLA-based 3D model of Mars"></canvas>
 
-      <section class="panel controls" aria-label="Controles de Marte 3D">
+      <button id="panel-toggle" type="button" title="Minimize" aria-label="Minimize">&laquo;</button>
+
+      <section class="panel controls" aria-label="Mars 3D controls" id="controls-panel">
         <div class="brand">
           <div>
-            <p class="eyebrow">NASA MOLA / MEGDR</p>
-            <h1>Marte 3D</h1>
+            <p class="eyebrow" data-i18n="brand.eyebrow">NASA MOLA / MEGDR</p>
+            <h1 data-i18n="brand.title">Mars 3D</h1>
           </div>
-          <span id="load-state">cargando</span>
+          <div class="brand-meta">
+            <select id="lang-select" aria-label="Language">
+              <option value="en">EN</option>
+              <option value="es">ES</option>
+            </select>
+            <span id="load-state" data-i18n="status.loading">loading</span>
+          </div>
         </div>
 
         <details class="control-section" open>
-          <summary>Agua</summary>
+          <summary data-i18n="section.water">Water</summary>
           <div class="control-group">
             <div class="control-title">
-              <label for="sea-level">Nivel del mar</label>
+              <label for="sea-level" data-i18n="label.seaLevel">Sea level</label>
               <output id="sea-output" for="sea-level">0 m</output>
             </div>
             <input id="sea-level" type="range" min="-9000" max="22000" value="0" step="100" />
             <div class="row">
               <input id="sea-number" type="number" min="-9000" max="22000" value="0" step="100" />
-              <button id="datum-button" type="button" data-sea-preset="0">Datum 0 m</button>
+              <button id="datum-button" type="button" data-sea-preset="0" data-i18n="btn.datum">Datum 0 m</button>
             </div>
-            <div class="preset-grid" aria-label="Presets de nivel del mar">
-              <button type="button" data-sea-preset="-9000">Seco</button>
+            <div class="preset-grid" aria-label="Sea level presets">
+              <button type="button" data-sea-preset="-9000" data-i18n="btn.dry">Dry</button>
               <button type="button" data-sea-preset="1000">+1 km</button>
               <button type="button" data-sea-preset="3000">+3 km</button>
               <button type="button" data-sea-preset="6000">+6 km</button>
               <button type="button" data-sea-preset="10000">+10 km</button>
-              <button type="button" id="balance-water">50%</button>
+              <button type="button" id="balance-water" data-i18n="btn.balanceWater">50%</button>
             </div>
           </div>
           <div class="switches compact">
-            <label><input id="water-toggle" type="checkbox" checked /> Superficie de agua</label>
-            <label><input id="connected-toggle" type="checkbox" checked /> Costa realista</label>
-            <label><input id="shore-toggle" type="checkbox" checked /> Bordes suaves</label>
-            <label><input id="rivers-toggle" type="checkbox" checked /> Rios por deshielo</label>
-            <label><input id="tributaries-toggle" type="checkbox" checked /> Afluentes</label>
+            <label><input id="water-toggle" type="checkbox" checked /> <span data-i18n="btn.waterSurface">Water surface</span></label>
+            <label><input id="connected-toggle" type="checkbox" checked /> <span data-i18n="btn.realCoast">Realistic coast</span></label>
+            <label><input id="shore-toggle" type="checkbox" checked /> <span data-i18n="btn.softShore">Soft shore</span></label>
+            <label><input id="rivers-toggle" type="checkbox" checked /> <span data-i18n="btn.rivers">Meltwater rivers</span></label>
+            <label><input id="tributaries-toggle" type="checkbox" checked /> <span data-i18n="btn.tributaries">Tributaries</span></label>
           </div>
         </details>
 
         <details class="control-section" open>
-          <summary>Terreno</summary>
+          <summary data-i18n="section.terrain">Terrain</summary>
           <div class="control-group">
             <div class="control-title">
-              <span>Modo visual</span>
+              <span data-i18n="label.visualMode">Visual mode</span>
               <output id="visual-output">Earth-like</output>
             </div>
-            <div class="segmented" role="group" aria-label="Modo visual">
+            <div class="segmented" role="group" aria-label="Visual mode">
               <button type="button" data-visual-mode="earth" class="active">Earth-like</button>
               <button type="button" data-visual-mode="mars">Mars raw</button>
               <button type="button" data-visual-mode="atlas">Atlas</button>
@@ -71,100 +79,100 @@
           </div>
           <div class="control-group">
             <div class="control-title">
-              <label for="height-scale">Relieve</label>
+              <label for="height-scale" data-i18n="label.relief">Relief</label>
               <output id="scale-output" for="height-scale">3x</output>
             </div>
             <input id="height-scale" type="range" min="1" max="40" value="3" step="1" />
             <div class="row">
-              <button id="real-scale" type="button">1x real</button>
-              <button id="visible-scale" type="button">3x natural</button>
-              <button id="dramatic-scale" type="button">18x dramatico</button>
+              <button id="real-scale" type="button" data-i18n="btn.realScale">1x real</button>
+              <button id="visible-scale" type="button" data-i18n="btn.naturalScale">3x natural</button>
+              <button id="dramatic-scale" type="button" data-i18n="btn.dramaticScale">18x dramatic</button>
             </div>
           </div>
           <div class="switches compact">
-            <label><input id="snow-toggle" type="checkbox" checked /> Nieve por altura</label>
-            <label><input id="polar-toggle" type="checkbox" checked /> Hielo polar</label>
-            <label><input id="biome-toggle" type="checkbox" checked /> Biomas</label>
-            <label><input id="ultra-toggle" type="checkbox" /> Ultra creativo</label>
-            <label><input id="wire-toggle" type="checkbox" /> Malla</label>
+            <label><input id="snow-toggle" type="checkbox" checked /> <span data-i18n="btn.snow">Snow by altitude</span></label>
+            <label><input id="polar-toggle" type="checkbox" checked /> <span data-i18n="btn.polarIce">Polar ice</span></label>
+            <label><input id="biome-toggle" type="checkbox" checked /> <span data-i18n="btn.biomes">Biomes</span></label>
+            <label><input id="ultra-toggle" type="checkbox" /> <span data-i18n="btn.ultraCreative">Ultra creative</span></label>
+            <label><input id="wire-toggle" type="checkbox" /> <span data-i18n="btn.wireframe">Wireframe</span></label>
           </div>
           <div class="control-group">
             <div class="control-title">
-              <label for="ice-extent">Extension de hielo</label>
+              <label for="ice-extent" data-i18n="label.iceExtent">Ice extent</label>
               <output id="ice-output" for="ice-extent">35%</output>
             </div>
             <input id="ice-extent" type="range" min="0" max="100" value="35" step="1" />
           </div>
           <div class="control-group ultra-controls">
             <div class="control-title">
-              <span>Intensidad Ultra</span>
-              <output id="ultra-output">Cinematico</output>
+              <span data-i18n="label.ultraIntensity">Ultra intensity</span>
+              <output id="ultra-output">Cinematic</output>
             </div>
-            <div class="segmented" role="group" aria-label="Intensidad Ultra">
-              <button type="button" data-ultra-intensity="subtle">Sutil</button>
-              <button type="button" data-ultra-intensity="cinematic" class="active">Cinematico</button>
-              <button type="button" data-ultra-intensity="extreme">Extremo</button>
+            <div class="segmented" role="group" aria-label="Ultra intensity">
+              <button type="button" data-ultra-intensity="subtle" data-i18n="btn.ultraSubtle">Subtle</button>
+              <button type="button" data-ultra-intensity="cinematic" class="active" data-i18n="btn.ultraCinematic">Cinematic</button>
+              <button type="button" data-ultra-intensity="extreme" data-i18n="btn.ultraExtreme">Extreme</button>
             </div>
           </div>
         </details>
 
         <details class="control-section" open>
-          <summary>Vista</summary>
+          <summary data-i18n="section.view">View</summary>
           <div class="control-group">
             <div class="control-title">
-              <span>Detalle</span>
+              <span data-i18n="label.detail">Detail</span>
               <output id="resolution-output">1440 x 720</output>
             </div>
-            <div class="segmented" role="group" aria-label="Resolucion de la malla">
-              <button type="button" data-resolution="low">Baja</button>
-              <button type="button" data-resolution="medium">Media</button>
-              <button type="button" data-resolution="high">Alta</button>
-              <button type="button" data-resolution="ultra" class="active">Ultra 1:1</button>
+            <div class="segmented" role="group" aria-label="Mesh resolution">
+              <button type="button" data-resolution="low" data-i18n="btn.resLow">Low</button>
+              <button type="button" data-resolution="medium" data-i18n="btn.resMedium">Medium</button>
+              <button type="button" data-resolution="high" data-i18n="btn.resHigh">High</button>
+              <button type="button" data-resolution="ultra" class="active" data-i18n="btn.resUltra">Ultra 1:1</button>
             </div>
           </div>
-          <div class="preset-grid camera-grid" aria-label="Destinos de camara">
-            <button type="button" data-camera-target="olympus">Olympus</button>
-            <button type="button" data-camera-target="valles">Valles</button>
-            <button type="button" data-camera-target="hellas">Hellas</button>
-            <button type="button" data-camera-target="tharsis">Tharsis</button>
-            <button type="button" data-camera-target="poles">Polos</button>
+          <div class="preset-grid camera-grid" aria-label="Camera targets">
+            <button type="button" data-camera-target="olympus" data-i18n="btn.camOlympus">Olympus</button>
+            <button type="button" data-camera-target="valles" data-i18n="btn.camValles">Valles</button>
+            <button type="button" data-camera-target="hellas" data-i18n="btn.camHellas">Hellas</button>
+            <button type="button" data-camera-target="tharsis" data-i18n="btn.camTharsis">Tharsis</button>
+            <button type="button" data-camera-target="poles" data-i18n="btn.camPoles">Poles</button>
           </div>
           <div class="preset-grid camera-grid" aria-label="Tours">
-            <button type="button" data-tour="seas">Mares</button>
-            <button type="button" data-tour="volcanoes">Volcanes</button>
-            <button type="button" data-tour="canyons">Canones</button>
-            <button type="button" data-tour="continents">Continentes</button>
-            <button type="button" id="beauty-shot">Captura bonita</button>
-            <button type="button" id="timelapse-button">Time-lapse mar</button>
-            <button type="button" id="share-button">Compartir vista</button>
+            <button type="button" data-tour="seas" data-i18n="btn.tourSeas">Seas</button>
+            <button type="button" data-tour="volcanoes" data-i18n="btn.tourVolcanoes">Volcanoes</button>
+            <button type="button" data-tour="canyons" data-i18n="btn.tourCanyons">Canyons</button>
+            <button type="button" data-tour="continents" data-i18n="btn.tourContinents">Continents</button>
+            <button type="button" id="beauty-shot" data-i18n="btn.beautyShot">Beauty shot</button>
+            <button type="button" id="timelapse-button" data-i18n="btn.timelapse">Sea time-lapse</button>
+            <button type="button" id="share-button" data-i18n="btn.share">Share view</button>
           </div>
           <div class="switches compact">
-            <label><input id="autorotate-toggle" type="checkbox" checked /> Auto-rotar</label>
-            <label><input id="orientation-toggle" type="checkbox" checked /> Orientacion</label>
-            <label><input id="labels-toggle" type="checkbox" checked /> Lugares</label>
-            <label><input id="atmosphere-toggle" type="checkbox" checked /> Atmosfera</label>
-            <label><input id="clouds-toggle" type="checkbox" checked /> Nubes</label>
+            <label><input id="autorotate-toggle" type="checkbox" checked /> <span data-i18n="btn.autorotate">Auto-rotate</span></label>
+            <label><input id="orientation-toggle" type="checkbox" checked /> <span data-i18n="btn.orientation">Orientation</span></label>
+            <label><input id="labels-toggle" type="checkbox" checked /> <span data-i18n="btn.places">Places</span></label>
+            <label><input id="atmosphere-toggle" type="checkbox" checked /> <span data-i18n="btn.atmosphere">Atmosphere</span></label>
+            <label><input id="clouds-toggle" type="checkbox" checked /> <span data-i18n="btn.clouds">Clouds</span></label>
           </div>
-          <button id="reset-camera" type="button" class="wide-button">Reset camara</button>
+          <button id="reset-camera" type="button" class="wide-button" data-i18n="btn.resetCamera">Reset camera</button>
         </details>
       </section>
 
-      <section class="panel readout" aria-label="Lecturas del modelo">
+      <section class="panel readout" aria-label="Model readouts">
         <div>
-          <span>Inundado</span>
+          <span data-i18n="stat.flooded">Flooded</span>
           <strong id="flooded-output">0.0%</strong>
         </div>
         <div>
-          <span>Agua</span>
-          <strong id="water-output">calculando</strong>
+          <span data-i18n="stat.water">Water</span>
+          <strong id="water-output" data-i18n="status.calculating">calculating</strong>
         </div>
         <div>
-          <span>Punto</span>
-          <strong id="cursor-output">pasa el cursor por Marte</strong>
+          <span data-i18n="stat.point">Point</span>
+          <strong id="cursor-output" data-i18n="stat.cursorHint">hover over Mars</strong>
         </div>
         <div>
-          <span>Rios</span>
-          <strong id="river-output">calculando</strong>
+          <span data-i18n="stat.rivers">Rivers</span>
+          <strong id="river-output" data-i18n="status.calculating">calculating</strong>
         </div>
       </section>
 
@@ -174,15 +182,15 @@
         <span>+21 km</span>
       </div>
 
-      <section class="panel minimap-panel" aria-label="Mapa 2D de Marte">
+      <section class="panel minimap-panel" aria-label="2D Mars map">
         <div class="map-title">
-          <span>Mapa 2D</span>
-          <strong id="scale-output-2">Radio 3396 km</strong>
+          <span data-i18n="section.map">2D map</span>
+          <strong id="scale-output-2">Radius 3396 km</strong>
         </div>
-        <canvas id="minimap" width="360" height="180" aria-label="Mapa equirectangular clicable"></canvas>
+        <canvas id="minimap" width="360" height="180" aria-label="Clickable equirectangular map"></canvas>
       </section>
     </main>
 
-    <script type="module" src="./src/app.js?v=31"></script>
+    <script type="module" src="./src/app.js?v=32"></script>
   </body>
 </html>

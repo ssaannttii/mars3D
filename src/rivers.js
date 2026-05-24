@@ -47,25 +47,8 @@ export function simulateRivers({ meta, heightData, flood, state }) {
   };
 }
 
-export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, colorTools, heightSampler }) {
-  const lakePositions = [];
-  const lakeColors = [];
-  const lakeIndices = [];
-
-  for (const lake of lakes || []) {
-    if (heightSampler) {
-      const centerH = heightSampler(lake.centerLat, lake.centerLon);
-      if (centerH > lake.surface + 80) continue;
-    }
-    appendLake({ THREE, meta, lake, state, positions: lakePositions, colors: lakeColors, indices: lakeIndices, colorTools });
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(lakePositions), 3));
-  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(lakeColors), 3));
-  geometry.setIndex(lakeIndices);
-  geometry.computeVertexNormals();
-  return geometry;
+export function buildRiverGeometry({ THREE }) {
+  return new THREE.BufferGeometry();
 }
 
 export function buildRiverLines({ THREE, meta, rivers, state, colorTools, heightSampler }) {

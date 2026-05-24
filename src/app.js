@@ -4,9 +4,10 @@ import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
 import { createColorTools } from "./colors.js";
 import { FloodModel } from "./flood.js";
 import { RESOLUTIONS, buildTerrainGeometry, updateTerrainColors } from "./geometry.js";
-import { buildRiverGeometry, buildRiverLines, simulateRivers } from "./rivers.js";
+import { buildRiverLines, simulateRivers } from "./rivers.js";
 import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from "./topography.js";
 import { createAtmosphere } from "./atmosphere.js";
+import { applyToDom, getLang, localeForNumbers, onLangChange, setLang, t } from "./i18n.js";
 import { createHeightTexture, createWaterMaterial, setWaterPalette } from "./water-shader.js";
 
 const LAKE_THRESHOLD_KM2 = 80000;
@@ -212,7 +213,6 @@ let floodModel;
 let flood;
 let terrainMesh;
 let waterMesh;
-let riverMesh;
 let riverLines;
 let riverModel = { rivers: [], lakes: [], deltas: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: 0 } };
 let stars;
@@ -220,7 +220,38 @@ let floodToken = 0;
 let mapMarker = { latitude: 0, longitude: 0 };
 let minimapBase;
 
+applyToDom();
+wireLangAndPanel();
+
 init();
+
+function wireLangAndPanel() {
+  const langSel = document.querySelector("#lang-select");
+  if (langSel) {
+    langSel.value = getLang();
+    langSel.addEventListener("change", (e) => setLang(e.target.value));
+  }
+  const minBtn = document.querySelector("#panel-toggle");
+  const panel = document.querySelector("#controls-panel");
+  const STORAGE = "mars3d.panel";
+  const stored = localStorage.getItem(STORAGE);
+  const setMinimized = (mini) => {
+    panel.classList.toggle("minimized", mini);
+    minBtn.textContent = mini ? "»" : "«";
+    minBtn.title = mini ? t("ui.expand") : t("ui.minimize");
+    minBtn.setAttribute("aria-label", minBtn.title);
+    localStorage.setItem(STORAGE, mini ? "1" : "0");
+  };
+  if (minBtn && panel) {
+    setMinimized(stored === "1");
+    minBtn.addEventListener("click", () => setMinimized(!panel.classList.contains("minimized")));
+  }
+  onLangChange(() => {
+    updateAllReadouts();
+    if (panel) setMinimized(panel.classList.contains("minimized"));
+    drawMinimap();
+  });
+}
 
 async function init() {
   try {
@@ -242,18 +273,18 @@ async function init() {
     buildOrientation();
     updateLabels();
 
-    el.loadState.textContent = "listo";
+    el.loadState.textContent = t("status.ready");
     animate();
   } catch (error) {
     console.error(error);
-    el.loadState.textContent = "error";
-    el.cursorOutput.textContent = "no se pudo cargar MOLA";
+    el.loadState.textContent = t("status.error");
+    el.cursorOutput.textContent = t("status.molaFailed");
   }
 }
 
 async function refreshFlood({ rebuildTerrain = false } = {}) {
   const token = ++floodToken;
-  el.loadState.textContent = "calculando";
+  el.loadState.textContent = t("status.calculating");
   const nextFlood = await floodModel.calculate({
     seaLevel: state.seaLevel,
     connected: state.connectedFlood,
@@ -268,7 +299,7 @@ async function refreshFlood({ rebuildTerrain = false } = {}) {
   rebuildRivers();
   drawMinimap();
   updateAllReadouts();
-  el.loadState.textContent = "listo";
+  el.loadState.textContent = t("status.ready");
 }
 
 function rebuildTerrainMesh() {
@@ -313,36 +344,6 @@ function rebuildRivers() {
   riverModel = simulateRivers({ meta, heightData, flood, state });
   const sampler = (lat, lon) => sampleHeight(meta, heightData, lat, lon);
 
-  const lakeGeometry = buildRiverGeometry({
-    THREE,
-    meta,
-    rivers: riverModel.rivers,
-    lakes: riverModel.lakes,
-    deltas: riverModel.deltas,
-    state,
-    colorTools,
-    heightSampler: sampler,
-  });
-  if (riverMesh) {
-    riverMesh.geometry.dispose();
-    riverMesh.geometry = lakeGeometry;
-  } else {
-    const material = new THREE.MeshBasicMaterial({
-      vertexColors: true,
-      transparent: true,
-      opacity: 0.7,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-      polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -2,
-    });
-    riverMesh = new THREE.Mesh(lakeGeometry, material);
-    riverMesh.renderOrder = 3.5;
-    scene.add(riverMesh);
-  }
-  riverMesh.visible = state.riversVisible && lakeGeometry.getIndex().count > 0;
-
   const lineGeometry = buildRiverLines({
     THREE,
     meta,
@@ -376,22 +377,23 @@ function updateAllReadouts() {
   el.seaNumber.value = String(state.seaLevel);
   el.scaleOutput.textContent = `${state.verticalScale}x`;
   el.heightScale.value = String(state.verticalScale);
-  el.visualOutput.textContent = state.visualMode === "earth" ? "Earth-like" : "Mars raw";
-  if (state.visualMode === "atlas") el.visualOutput.textContent = "Atlas";
+  if (state.visualMode === "earth") el.visualOutput.textContent = "Earth-like";
+  else if (state.visualMode === "atlas") el.visualOutput.textContent = "Atlas";
+  else el.visualOutput.textContent = "Mars raw";
   el.ultraOutput.textContent = ultraLabel(state.ultraIntensity);
   el.floodedOutput.textContent = `${flood.stats.floodedPercent.toFixed(1)}%`;
   el.waterOutput.textContent = formatWaterStats(flood.stats);
   el.riverOutput.textContent = formatRiverStats(riverModel.stats);
-  el.scaleOutput2.textContent = `Radio ${Math.round(meta.marsRadiusMeters / 1000)} km`;
+  el.scaleOutput2.textContent = `${t("label.radius")} ${Math.round(meta.marsRadiusMeters / 1000)} km`;
   el.polarToggle.disabled = !state.snowCaps;
 }
 
 function formatWaterStats(stats) {
-  if (stats.floodedAreaKm2 < 1) return "seco";
+  if (stats.floodedAreaKm2 < 1) return t("stat.dry");
   const ocean = formatArea(stats.oceanAreaKm2);
-  if (!state.connectedFlood) return `${ocean} todo bajo nivel`;
-  if (stats.lakeCount === 0) return `${ocean} oceano`;
-  return `${ocean} oceano / ${stats.lakeCount} lagos`;
+  if (!state.connectedFlood) return `${ocean} ${t("stat.allBelow")}`;
+  if (stats.lakeCount === 0) return `${ocean} ${t("stat.ocean")}`;
+  return `${ocean} ${t("stat.ocean")} / ${stats.lakeCount} ${t("stat.lakes")}`;
 }
 
 function formatArea(value) {
@@ -400,9 +402,9 @@ function formatArea(value) {
 }
 
 function formatRiverStats(stats) {
-  if (!stats.count) return "sin cauces";
-  const lakes = stats.lakeCount ? ` / ${stats.lakeCount} lagos` : "";
-  return `${stats.count} rios / ${Math.round(stats.longestKm).toLocaleString("es-ES")} km${lakes}`;
+  if (!stats.count) return t("stat.noRivers");
+  const lakes = stats.lakeCount ? ` / ${stats.lakeCount} ${t("stat.lakes")}` : "";
+  return `${stats.count} ${t("stat.rivers").toLowerCase()} / ${Math.round(stats.longestKm).toLocaleString(localeForNumbers())} km${lakes}`;
 }
 
 function setSeaLevel(value) {
@@ -413,7 +415,7 @@ function setSeaLevel(value) {
 }
 
 async function setBalancedSeaLevel() {
-  el.loadState.textContent = "buscando 50%";
+  el.loadState.textContent = t("status.searching50");
   let low = meta.minimumMeters;
   let high = meta.maximumMeters;
   let bestLevel = 0;
@@ -619,15 +621,15 @@ function wireEvents() {
 
   renderer.domElement.addEventListener("pointermove", onPointerMove);
   renderer.domElement.addEventListener("pointerleave", () => {
-    el.cursorOutput.textContent = "pasa el cursor por Marte";
+    el.cursorOutput.textContent = t("stat.cursorHint");
   });
   window.addEventListener("resize", onResize);
 }
 
 function ultraLabel(value) {
-  if (value === "subtle") return "Sutil";
-  if (value === "extreme") return "Extremo";
-  return "Cinematico";
+  if (value === "subtle") return t("btn.ultraSubtle");
+  if (value === "extreme") return t("btn.ultraExtreme");
+  return t("btn.ultraCinematic");
 }
 
 function buildLabels() {
@@ -800,7 +802,7 @@ function onMinimapClick(event) {
   mapMarker = { latitude, longitude };
   drawMinimapMarker();
   const height = sampleHeight(meta, heightData, latitude, longitude);
-  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? "agua" : "seco";
+  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? t("land.surface.water") : t("land.surface.dry");
   el.cursorOutput.textContent = `${latitude.toFixed(2)} deg, ${longitude.toFixed(2)} deg / ${formatMeters(height)} / ${surface}`;
   focusCamera({ THREE, camera, controls, meta, target: { lat: latitude, lon: longitude, distance: 2.18 } });
 }
@@ -938,7 +940,7 @@ function onPointerMove(event) {
   const latitude = THREE.MathUtils.radToDeg(Math.asin(normal.y));
   const longitude = (THREE.MathUtils.radToDeg(Math.atan2(normal.z, normal.x)) + 180 + 360) % 360;
   const height = sampleHeight(meta, heightData, latitude, longitude);
-  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? "agua" : "seco";
+  const surface = sampleFloodMask(meta, flood.mask, latitude, longitude) ? t("land.surface.water") : t("land.surface.dry");
   mapMarker = { latitude, longitude };
   drawMinimapMarker();
   el.cursorOutput.textContent = `${latitude.toFixed(2)} deg, ${longitude.toFixed(2)} deg / ${formatMeters(height)} / ${surface}`;
@@ -965,7 +967,7 @@ function animate() {
 }
 
 function formatMeters(value) {
-  return `${Math.round(value).toLocaleString("es-ES")} m`;
+  return `${Math.round(value).toLocaleString(localeForNumbers())} m`;
 }
 
 let timelapseAnim = null;
@@ -1004,7 +1006,7 @@ function copyShareLink() {
   navigator.clipboard.writeText(url).then(
     () => {
       const old = el.shareButton.textContent;
-      el.shareButton.textContent = "Copiado ✓";
+      el.shareButton.textContent = t("btn.shareCopied");
       setTimeout(() => (el.shareButton.textContent = old), 1500);
     },
     () => {
