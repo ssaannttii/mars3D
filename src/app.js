@@ -67,10 +67,11 @@ controls.maxDistance = 7.5;
 controls.autoRotate = true;
 controls.autoRotateSpeed = 0.25;
 
-scene.add(new THREE.HemisphereLight(0xc8f7ff, 0x2d170f, 2.1));
-const sun = new THREE.DirectionalLight(0xfff3da, 4.3);
-sun.position.set(3.8, 2.6, 2.2);
+scene.add(new THREE.HemisphereLight(0xc8f7ff, 0x1a0e08, 0.55));
+const sun = new THREE.DirectionalLight(0xfff3da, 5.8);
+sun.position.set(4.2, 1.4, 2.6);
 scene.add(sun);
+scene.add(new THREE.AmbientLight(0x4a5566, 0.25));
 
 const textureLoader = new THREE.TextureLoader();
 const cloudTexture = textureLoader.load("./data/clouds.jpg");
@@ -932,6 +933,7 @@ function animate() {
   updateLabelVisibility();
   if (stars) stars.rotation.y += 0.00008;
   atmosphere.tick(dt);
+  if (waterMaterial) waterMaterial.uniforms.uTime.value += dt;
   renderer.render(scene, camera);
 }
 

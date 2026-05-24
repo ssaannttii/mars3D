@@ -38,21 +38,39 @@ const CLOUDS_FRAG = `
   varying vec3 vWorldNormal;
   varying vec3 vWorldPos;
 
+  vec2 vortex(vec2 uv, vec2 center, float strength, float radius) {
+    vec2 d = uv - center;
+    float dist = length(d);
+    float t = smoothstep(radius, 0.0, dist) * strength;
+    float c = cos(t);
+    float s = sin(t);
+    return center + mat2(c, -s, s, c) * d;
+  }
+
   void main() {
     vec3 n = normalize(vWorldNormal);
     float lat = asin(clamp(n.y, -1.0, 1.0));
     float lon = atan(n.z, n.x);
     float u = lon / (2.0 * 3.14159265) + 0.5 + uTime * 0.0035;
     float v = 0.5 - lat / 3.14159265;
-    vec4 sample0 = texture2D(uCloudMap, vec2(u, v));
-    vec4 sample1 = texture2D(uCloudMap, vec2(u * 1.7 + 0.13, v * 1.3 + 0.07));
-    float density = sample0.r * 0.85 + sample1.r * 0.28;
-    density = clamp(pow(density, 1.05), 0.0, 1.0);
+
+    vec2 uv = vec2(u, v);
+    uv = vortex(uv, vec2(0.18, 0.32), 1.6, 0.13);
+    uv = vortex(uv, vec2(0.74, 0.38), -1.4, 0.14);
+    uv = vortex(uv, vec2(0.42, 0.65), 1.2, 0.12);
+    uv = vortex(uv, vec2(0.88, 0.7), -1.0, 0.1);
+    uv = vortex(uv, vec2(0.05, 0.58), 0.9, 0.09);
+
+    vec4 sample0 = texture2D(uCloudMap, uv);
+    vec4 sample1 = texture2D(uCloudMap, vec2(uv.x * 1.7 + 0.13, uv.y * 1.3 + 0.07));
+    vec4 sample2 = texture2D(uCloudMap, vec2(uv.x * 3.4 - 0.21, uv.y * 2.5 - 0.18));
+    float density = sample0.r * 0.7 + sample1.r * 0.3 + sample2.r * 0.18;
+    density = clamp(pow(density, 1.0) - 0.05, 0.0, 1.0);
 
     float sunDot = clamp(dot(normalize(uSunDirection), n), 0.0, 1.0);
-    float lit = 0.55 + sunDot * 1.05;
+    float lit = 0.4 + sunDot * 1.25;
     vec3 col = mix(uShadow, uTint, lit);
-    col = mix(col, uTint * 1.25, density * sunDot * 0.7);
+    col = mix(col, uTint * 1.3, density * sunDot * 0.8);
 
     float alpha = density * uOpacity;
     if (alpha < 0.02) discard;

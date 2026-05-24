@@ -148,10 +148,10 @@ function applySnowAndIce(color, { height, latitude, slope, snowCaps, polarIce, v
 
   if (snowCaps) {
     const flatness = 1 - clamp(slope, 0, 1);
-    const snowAmount = smoothstep(9500, 17000, height) * (0.25 + flatness * 0.45);
+    const snowAmount = smoothstep(13500, 21000, height) * (0.18 + flatness * 0.32) * flatness;
     if (snowAmount > 0) {
-      const shadowAmount = smoothstep(9500, 17000, height) * 0.15;
-      result = scratch.mix.copy(result).lerp(scratch.snowShadow, shadowAmount).lerp(scratch.snow, snowAmount * 0.7);
+      const shadowAmount = smoothstep(13500, 21000, height) * 0.1;
+      result = scratch.mix.copy(result).lerp(scratch.snowShadow, shadowAmount).lerp(scratch.snow, snowAmount * 0.6);
     }
   }
 

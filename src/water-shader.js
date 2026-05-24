@@ -40,6 +40,30 @@ const WATER_FRAG = `
     return texture2D(uHeight, uv).r;
   }
 
+  float hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  }
+  float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    float a = hash(i);
+    float b = hash(i + vec2(1.0, 0.0));
+    float c = hash(i + vec2(0.0, 1.0));
+    float d = hash(i + vec2(1.0, 1.0));
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+  float fbm(vec2 p) {
+    float v = 0.0;
+    float a = 0.55;
+    for (int i = 0; i < 4; i++) {
+      v += a * vnoise(p);
+      p *= 2.05;
+      a *= 0.5;
+    }
+    return v;
+  }
+
   void main() {
     vec3 n = normalize(vWorldNormal);
     float lat = asin(clamp(n.y, -1.0, 1.0));
@@ -55,18 +79,34 @@ const WATER_FRAG = `
     vec3 baseColor = mix(uShallowColor, uMidColor, smoothstep(0.0, 0.35, deepness));
     baseColor = mix(baseColor, uDeepColor, smoothstep(0.3, 1.0, deepness));
 
-    vec3 viewDir = normalize(cameraPosition - vWorldPos);
-    float fresnel = pow(1.0 - max(dot(viewDir, n), 0.0), 3.0);
+    vec2 wave1 = uv * vec2(420.0, 220.0) + vec2(uTime * 0.18, uTime * 0.07);
+    vec2 wave2 = uv * vec2(880.0, 440.0) + vec2(-uTime * 0.11, uTime * 0.16);
+    float ripple = fbm(wave1) * 0.55 + fbm(wave2) * 0.45;
+    vec3 ripplePerturb = normalize(vec3(
+      ripple - fbm(wave1 + vec2(1.7, 0.0)),
+      0.55,
+      ripple - fbm(wave1 + vec2(0.0, 1.7))
+    ));
+    vec3 nRippled = normalize(n + ripplePerturb * 0.045);
 
-    float sunDot = max(dot(normalize(uSunDirection), n), 0.0);
-    vec3 reflectDir = reflect(-normalize(uSunDirection), n);
-    float spec = pow(max(dot(reflectDir, viewDir), 0.0), 96.0) * sunDot * 1.4;
-    float diffuse = 0.4 + sunDot * 0.6;
+    vec3 viewDir = normalize(cameraPosition - vWorldPos);
+    float fresnel = pow(1.0 - max(dot(viewDir, nRippled), 0.0), 3.0);
+
+    float sunDot = max(dot(normalize(uSunDirection), nRippled), 0.0);
+    vec3 reflectDir = reflect(-normalize(uSunDirection), nRippled);
+    float spec = pow(max(dot(reflectDir, viewDir), 0.0), 120.0) * sunDot * 2.2;
+    float specWide = pow(max(dot(reflectDir, viewDir), 0.0), 24.0) * sunDot * 0.45;
+    float diffuse = 0.32 + sunDot * 0.68;
 
     vec3 col = baseColor * diffuse;
     col = mix(col, vec3(1.05, 1.1, 1.15), fresnel * 0.42);
-    col += vec3(1.0, 0.97, 0.86) * spec;
-    col = mix(uShoreColor * (0.6 + sunDot * 0.5), col, shore);
+    col += vec3(1.0, 0.97, 0.86) * (spec + specWide);
+
+    float foam = smoothstep(0.0, 40.0, depth) * (1.0 - smoothstep(40.0, 180.0, depth));
+    foam *= 0.6 + 0.4 * fbm(uv * 900.0 + uTime * 0.3);
+    col = mix(col, vec3(0.92, 0.95, 0.97), foam * 0.55);
+
+    col = mix(uShoreColor * (0.5 + sunDot * 0.5), col, shore);
 
     float alpha = clamp(shore * 0.65 + 0.5, 0.0, 1.0);
     gl_FragColor = vec4(col, alpha);
