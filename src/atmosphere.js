@@ -11,6 +11,7 @@ const ATMOSPHERE_VERT = `
 
 const ATMOSPHERE_FRAG = `
   uniform vec3 uColor;
+  uniform vec3 uDeepColor;
   uniform vec3 uSunDirection;
   uniform float uIntensity;
   uniform float uPower;
@@ -19,12 +20,16 @@ const ATMOSPHERE_FRAG = `
   void main() {
     vec3 viewDir = normalize(cameraPosition - vWorldPos);
     vec3 n = normalize(vWorldNormal);
-    float rim = 1.0 - max(dot(viewDir, n), 0.0);
-    rim = pow(rim, uPower);
-    float sunDot = clamp(dot(normalize(uSunDirection), n), -0.2, 1.0);
-    float sunGlow = pow(max(sunDot, 0.0), 1.2) * 0.7 + 0.35;
-    vec3 col = uColor * rim * uIntensity * sunGlow;
-    gl_FragColor = vec4(col, rim * 0.98);
+    float dotVN = max(dot(viewDir, n), 0.0);
+    float rim = 1.0 - dotVN;
+    float core = pow(rim, uPower);
+    float halo = pow(rim, uPower * 0.42) * 0.55;
+    float sunDot = clamp(dot(normalize(uSunDirection), n), -0.25, 1.0);
+    float sunGlow = pow(max(sunDot, 0.0), 1.4) * 0.85 + 0.28;
+    vec3 col = mix(uDeepColor, uColor, core);
+    col = col * (core + halo * 0.9) * uIntensity * sunGlow;
+    float alpha = clamp(core * 0.85 + halo * 0.55, 0.0, 1.0);
+    gl_FragColor = vec4(col, alpha);
   }
 `;
 
@@ -79,15 +84,16 @@ const CLOUDS_FRAG = `
 `;
 
 export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0, cloudTexture = null }) {
-  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.075, 128, 80);
+  const haloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.22, 128, 96);
   const haloMaterial = new THREE.ShaderMaterial({
     vertexShader: ATMOSPHERE_VERT,
     fragmentShader: ATMOSPHERE_FRAG,
     uniforms: {
-      uColor: { value: new THREE.Color("#8ec0ec") },
+      uColor: { value: new THREE.Color("#9ec8ee") },
+      uDeepColor: { value: new THREE.Color("#1a2c4a") },
       uSunDirection: { value: new THREE.Vector3(3.8, 2.6, 2.2).normalize() },
-      uIntensity: { value: 1.55 },
-      uPower: { value: 2.6 },
+      uIntensity: { value: 1.25 },
+      uPower: { value: 3.4 },
     },
     transparent: true,
     side: THREE.BackSide,
@@ -97,6 +103,26 @@ export function createAtmosphere({ THREE, scene, marsRadiusScene = 1.0, cloudTex
   const halo = new THREE.Mesh(haloGeometry, haloMaterial);
   halo.renderOrder = 5;
   scene.add(halo);
+
+  const innerHaloGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.03, 128, 80);
+  const innerHaloMaterial = new THREE.ShaderMaterial({
+    vertexShader: ATMOSPHERE_VERT,
+    fragmentShader: ATMOSPHERE_FRAG,
+    uniforms: {
+      uColor: { value: new THREE.Color("#c2dcf2") },
+      uDeepColor: { value: new THREE.Color("#0a1830") },
+      uSunDirection: haloMaterial.uniforms.uSunDirection,
+      uIntensity: { value: 0.7 },
+      uPower: { value: 6.5 },
+    },
+    transparent: true,
+    side: THREE.FrontSide,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const innerHalo = new THREE.Mesh(innerHaloGeometry, innerHaloMaterial);
+  innerHalo.renderOrder = 4.6;
+  scene.add(innerHalo);
 
   const cloudGeometry = new THREE.SphereGeometry(marsRadiusScene * 1.028, 128, 80);
   const cloudMaterial = new THREE.ShaderMaterial({

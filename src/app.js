@@ -4,7 +4,7 @@ import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
 import { createColorTools } from "./colors.js";
 import { FloodModel } from "./flood.js";
 import { RESOLUTIONS, buildTerrainGeometry, updateTerrainColors } from "./geometry.js";
-import { buildRiverGeometry, simulateRivers } from "./rivers.js";
+import { buildRiverGeometry, buildRiverLines, simulateRivers } from "./rivers.js";
 import { loadTopography, sampleFloodMask, sampleHeight, sphericalPoint } from "./topography.js";
 import { createAtmosphere } from "./atmosphere.js";
 import { createHeightTexture, createWaterMaterial, setWaterPalette } from "./water-shader.js";
@@ -213,6 +213,7 @@ let flood;
 let terrainMesh;
 let waterMesh;
 let riverMesh;
+let riverLines;
 let riverModel = { rivers: [], lakes: [], deltas: [], stats: { count: 0, longestKm: 0, widestKm: 0, outletCount: 0, lakeCount: 0 } };
 let stars;
 let floodToken = 0;
@@ -310,7 +311,9 @@ function rebuildWaterMesh() {
 
 function rebuildRivers() {
   riverModel = simulateRivers({ meta, heightData, flood, state });
-  const geometry = buildRiverGeometry({
+  const sampler = (lat, lon) => sampleHeight(meta, heightData, lat, lon);
+
+  const lakeGeometry = buildRiverGeometry({
     THREE,
     meta,
     rivers: riverModel.rivers,
@@ -318,34 +321,53 @@ function rebuildRivers() {
     deltas: riverModel.deltas,
     state,
     colorTools,
-    heightSampler: (lat, lon) => sampleHeight(meta, heightData, lat, lon),
+    heightSampler: sampler,
   });
   if (riverMesh) {
     riverMesh.geometry.dispose();
-    riverMesh.geometry = geometry;
+    riverMesh.geometry = lakeGeometry;
   } else {
-    const material = new THREE.MeshPhysicalMaterial({
+    const material = new THREE.MeshBasicMaterial({
       vertexColors: true,
       transparent: true,
-      opacity: 0.55,
-      roughness: 0.9,
-      metalness: 0,
-      transmission: 0,
-      clearcoat: 0,
-      clearcoatRoughness: 1,
-      specularIntensity: 0.05,
+      opacity: 0.7,
       side: THREE.DoubleSide,
       depthWrite: false,
-      depthTest: true,
       polygonOffset: true,
-      polygonOffsetFactor: -4,
-      polygonOffsetUnits: -4,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2,
     });
-    riverMesh = new THREE.Mesh(geometry, material);
+    riverMesh = new THREE.Mesh(lakeGeometry, material);
     riverMesh.renderOrder = 3.5;
     scene.add(riverMesh);
   }
-  riverMesh.visible = state.riversVisible && geometry.getIndex().count > 0;
+  riverMesh.visible = state.riversVisible && lakeGeometry.getIndex().count > 0;
+
+  const lineGeometry = buildRiverLines({
+    THREE,
+    meta,
+    rivers: riverModel.rivers,
+    state,
+    colorTools,
+    heightSampler: sampler,
+  });
+  if (riverLines) {
+    riverLines.geometry.dispose();
+    riverLines.geometry = lineGeometry;
+  } else {
+    const lineMaterial = new THREE.LineBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.92,
+      linewidth: 1,
+      depthWrite: false,
+      depthTest: true,
+    });
+    riverLines = new THREE.LineSegments(lineGeometry, lineMaterial);
+    riverLines.renderOrder = 4.2;
+    scene.add(riverLines);
+  }
+  riverLines.visible = state.riversVisible && lineGeometry.getAttribute("position").count > 0;
 }
 
 function updateAllReadouts() {
@@ -866,33 +888,38 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 function addStars() {
-  const count = 1600;
+  const count = 5200;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const sizes = new Float32Array(count);
 
   for (let i = 0; i < count; i += 1) {
-    const radius = 28 + Math.random() * 22;
+    const radius = 30 + Math.random() * 20;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(Math.random() * 2 - 1);
     positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
     positions[i * 3 + 1] = radius * Math.cos(phi);
     positions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
 
-    const warmth = 0.76 + Math.random() * 0.24;
-    colors[i * 3] = warmth;
-    colors[i * 3 + 1] = warmth * (0.86 + Math.random() * 0.12);
-    colors[i * 3 + 2] = warmth * (0.78 + Math.random() * 0.2);
+    const bright = Math.pow(Math.random(), 4);
+    const warmth = 0.65 + Math.random() * 0.35;
+    const bri = 0.45 + bright * 0.55;
+    colors[i * 3] = warmth * bri;
+    colors[i * 3 + 1] = warmth * (0.84 + Math.random() * 0.16) * bri;
+    colors[i * 3 + 2] = warmth * (0.78 + Math.random() * 0.22) * bri;
+    sizes[i] = 1.0 + bright * 2.4;
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
   geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
-    size: 0.025,
+    size: 1.4,
     vertexColors: true,
-    sizeAttenuation: true,
+    sizeAttenuation: false,
     transparent: true,
-    opacity: 0.72,
+    opacity: 0.95,
+    depthWrite: false,
   });
   stars = new THREE.Points(geometry, material);
   scene.add(stars);

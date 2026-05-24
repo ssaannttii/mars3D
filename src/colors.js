@@ -62,7 +62,12 @@ export function createColorTools(THREE) {
   scratch.polarIce = new THREE.Color("#e6f2ef");
   scratch.green = new THREE.Color("#4a7d4f");
   scratch.darkGreen = new THREE.Color("#2d5436");
+  scratch.forest = new THREE.Color("#1e3a26");
+  scratch.savanna = new THREE.Color("#a39450");
   scratch.desert = new THREE.Color("#b88f55");
+  scratch.sand = new THREE.Color("#d8c190");
+  scratch.cliff = new THREE.Color("#6e655c");
+  scratch.scree = new THREE.Color("#8a7a6d");
   scratch.rock = new THREE.Color("#78665a");
   scratch.shadow = new THREE.Color("#28313a");
   scratch.light = new THREE.Color("#fff0bc");
@@ -122,18 +127,32 @@ function applyBiomes(color, { height, latitude, seaLevel, slope, biomes, visualM
 
   const absLat = Math.abs(latitude);
   const aboveSea = height - seaLevel;
+  const flatness = 1 - clamp(slope, 0, 1);
+  const steep = clamp(slope, 0, 1);
+
+  const beach = (1 - smoothstep(0, 280, aboveSea)) * flatness * smoothstep(0, 1, aboveSea < 0 ? 0 : 1);
+  const cliff = smoothstep(0.45, 0.85, slope);
   const coastalWet = 1 - smoothstep(200, 3200, Math.max(aboveSea, 0));
   const temperate = 1 - smoothstep(32, 70, absLat);
   const tropical = 1 - smoothstep(0, 28, absLat);
+  const forest = coastalWet * temperate * flatness;
+  const jungle = coastalWet * tropical * flatness;
   const tropicDry = smoothstep(8, 27, absLat) * (1 - smoothstep(34, 48, absLat));
+  const savanna = tropicDry * flatness * (1 - coastalWet * 0.4);
   const interiorDry = smoothstep(1400, 6800, aboveSea) * (1 - coastalWet * 0.65);
-  const highRock = smoothstep(4500, 9500, height) * (0.42 + slope * 0.58);
+  const desertAmount = clamp(tropicDry * 0.3 + interiorDry * 0.36, 0, 0.55);
+  const highRock = smoothstep(3800, 9000, height) * (0.4 + steep * 0.6);
+  const screeAmount = smoothstep(0.35, 0.7, slope) * smoothstep(800, 5500, height);
 
   let result = scratch.mix.copy(color);
-  result.lerp(scratch.darkGreen, coastalWet * tropical * 0.55);
-  result.lerp(scratch.green, coastalWet * temperate * 0.5);
-  result.lerp(scratch.desert, clamp(tropicDry * 0.28 + interiorDry * 0.34, 0, 0.5));
-  result.lerp(scratch.rock, highRock * 0.28);
+  result.lerp(scratch.sand, beach * 0.65);
+  result.lerp(scratch.forest, jungle * 0.55);
+  result.lerp(scratch.green, forest * 0.5);
+  result.lerp(scratch.savanna, savanna * 0.32);
+  result.lerp(scratch.desert, desertAmount);
+  result.lerp(scratch.scree, screeAmount * 0.35);
+  result.lerp(scratch.cliff, cliff * 0.55);
+  result.lerp(scratch.rock, highRock * 0.32);
   return result;
 }
 

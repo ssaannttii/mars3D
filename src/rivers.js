@@ -48,31 +48,61 @@ export function simulateRivers({ meta, heightData, flood, state }) {
 }
 
 export function buildRiverGeometry({ THREE, meta, rivers, lakes, deltas, state, colorTools, heightSampler }) {
-  const positions = [];
-  const colors = [];
-  const indices = [];
-  const baseColor = colorTools.waterColor({ depth: 1600, visualMode: state.visualMode }).clone();
+  const lakePositions = [];
+  const lakeColors = [];
+  const lakeIndices = [];
 
-  for (const river of rivers || []) {
-    appendRiverRibbon({ THREE, meta, river, state, positions, colors, indices, baseColor, colorTools });
-  }
-  for (const delta of deltas || []) {
-    appendDelta({ THREE, meta, delta, state, positions, colors, indices, colorTools, heightSampler });
-  }
   for (const lake of lakes || []) {
     if (heightSampler) {
       const centerH = heightSampler(lake.centerLat, lake.centerLon);
       if (centerH > lake.surface + 80) continue;
     }
-    appendLake({ THREE, meta, lake, state, positions, colors, indices, colorTools });
+    appendLake({ THREE, meta, lake, state, positions: lakePositions, colors: lakeColors, indices: lakeIndices, colorTools });
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(lakePositions), 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(lakeColors), 3));
+  geometry.setIndex(lakeIndices);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+export function buildRiverLines({ THREE, meta, rivers, state, colorTools, heightSampler }) {
+  const positions = [];
+  const colors = [];
+  const baseColor = colorTools.waterColor({ depth: 1600, visualMode: state.visualMode }).clone();
+
+  for (const river of rivers || []) {
+    if (river.points.length < 2) continue;
+    for (let i = 0; i < river.points.length - 1; i += 1) {
+      const a = river.points[i];
+      const b = river.points[i + 1];
+      const ha = pointGroundHeight(a, state, heightSampler);
+      const hb = pointGroundHeight(b, state, heightSampler);
+      const pa = sphericalPoint(THREE, meta, a.lat, a.lon, ha, state.verticalScale);
+      const pb = sphericalPoint(THREE, meta, b.lat, b.lon, hb, state.verticalScale);
+      positions.push(pa.x, pa.y, pa.z, pb.x, pb.y, pb.z);
+      const t = clamp(a.discharge / Math.max(river.maxDischarge, 1), 0, 1);
+      const depth = 320 + Math.sqrt(a.discharge) * 280;
+      const colA = baseColor.clone().lerp(colorTools.waterColor({ depth, visualMode: state.visualMode }), 0.7 + t * 0.25);
+      colA.toArray(colors, colors.length);
+      colA.toArray(colors, colors.length);
+    }
   }
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array(positions), 3));
   geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(colors), 3));
-  geometry.setIndex(indices);
-  geometry.computeVertexNormals();
   return geometry;
+}
+
+function pointGroundHeight(point, state, heightSampler) {
+  const sea = state.seaLevel || 0;
+  const sampled = heightSampler ? heightSampler(point.lat, point.lon) : point.height;
+  const groundHeight = Math.max(sampled, point.height);
+  if (groundHeight < sea - 50) return sea + 25;
+  return groundHeight + 8;
 }
 
 function ensureGrid(meta, heightData) {
