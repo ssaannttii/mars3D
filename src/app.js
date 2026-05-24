@@ -4,6 +4,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { createAtmospherePass } from "./atmosphere-pass.js";
 import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
 import { createColorTools } from "./colors.js";
 import { FloodModel } from "./flood.js";
@@ -133,6 +134,17 @@ const composer = new EffectComposer(renderer);
 composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 composer.setSize(window.innerWidth, window.innerHeight);
 composer.addPass(new RenderPass(scene, camera));
+
+const atmospherePass = createAtmospherePass(THREE, camera, {
+  planetRadius: 1.0,
+  atmoRadius: 1.22,
+  color: "#8cbef0",
+  horizon: "#244d8a",
+  intensity: 1.5,
+});
+atmospherePass.uniforms.uSunDirection.value.copy(sun.position).normalize();
+composer.addPass(atmospherePass);
+
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
   0.6,
@@ -141,6 +153,8 @@ const bloomPass = new UnrealBloomPass(
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
+
+atmosphere.setVisible(false); // shell-based halo replaced by raymarched pass
 
 const envScene = new THREE.Scene();
 envScene.background = new THREE.Color(0x0a0c11);
@@ -1087,6 +1101,7 @@ function animate() {
   if (atmosphere.clouds) {
     terrainUniforms.uCloudOffset.value.x = -atmosphere.clouds.rotation.y / (2 * Math.PI);
   }
+  atmospherePass.update();
   composer.render();
 }
 
