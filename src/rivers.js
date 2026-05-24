@@ -56,11 +56,15 @@ export function buildRiverLines({ THREE, meta, rivers, state, colorTools, height
   const colors = [];
   const baseColor = colorTools.waterColor({ depth: 1600, visualMode: state.visualMode }).clone();
 
+  const sea = state.seaLevel || 0;
   for (const river of rivers || []) {
     if (river.points.length < 2) continue;
     for (let i = 0; i < river.points.length - 1; i += 1) {
       const a = river.points[i];
       const b = river.points[i + 1];
+      const sampledA = heightSampler ? heightSampler(a.lat, a.lon) : a.height;
+      const sampledB = heightSampler ? heightSampler(b.lat, b.lon) : b.height;
+      if (sampledA <= sea + 5 || sampledB <= sea + 5) continue;
       const ha = pointGroundHeight(a, state, heightSampler);
       const hb = pointGroundHeight(b, state, heightSampler);
       const pa = sphericalPoint(THREE, meta, a.lat, a.lon, ha, state.verticalScale);
