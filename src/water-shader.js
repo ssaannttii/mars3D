@@ -92,21 +92,25 @@ const WATER_FRAG = `
     vec3 viewDir = normalize(cameraPosition - vWorldPos);
     float fresnel = pow(1.0 - max(dot(viewDir, nRippled), 0.0), 3.0);
 
-    float sunDot = max(dot(normalize(uSunDirection), nRippled), 0.0);
-    vec3 reflectDir = reflect(-normalize(uSunDirection), nRippled);
+    vec3 sunDirN = normalize(uSunDirection);
+    float sunDotRaw = dot(sunDirN, nRippled);
+    float sunDot = max(sunDotRaw, 0.0);
+    float dayMix = smoothstep(-0.15, 0.18, sunDotRaw);
+    vec3 reflectDir = reflect(-sunDirN, nRippled);
     float spec = pow(max(dot(reflectDir, viewDir), 0.0), 120.0) * sunDot * 2.2;
     float specWide = pow(max(dot(reflectDir, viewDir), 0.0), 24.0) * sunDot * 0.45;
-    float diffuse = 0.32 + sunDot * 0.68;
+    float diffuse = 0.05 + sunDot * 0.95;
 
     vec3 col = baseColor * diffuse;
-    col = mix(col, vec3(1.05, 1.1, 1.15), fresnel * 0.42);
+    col = mix(col, vec3(1.05, 1.1, 1.15), fresnel * 0.42 * dayMix);
     col += vec3(1.0, 0.97, 0.86) * (spec + specWide);
 
     float foam = smoothstep(0.0, 40.0, depth) * (1.0 - smoothstep(40.0, 180.0, depth));
     foam *= 0.6 + 0.4 * fbm(uv * 900.0 + uTime * 0.3);
-    col = mix(col, vec3(0.92, 0.95, 0.97), foam * 0.55);
+    col = mix(col, vec3(0.92, 0.95, 0.97), foam * 0.55 * dayMix);
 
-    col = mix(uShoreColor * (0.5 + sunDot * 0.5), col, shore);
+    col = mix(uShoreColor * (0.05 + sunDot * 0.6), col, shore);
+    col *= mix(vec3(0.18, 0.22, 0.32), vec3(1.0), dayMix);
 
     float alpha = clamp(shore * 0.65 + 0.5, 0.0, 1.0);
     gl_FragColor = vec4(col, alpha);
