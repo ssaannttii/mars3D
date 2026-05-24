@@ -75,7 +75,7 @@ scene.add(sun);
 scene.add(new THREE.AmbientLight(0x4a5566, 0.25));
 
 const textureLoader = new THREE.TextureLoader();
-const cloudTexture = textureLoader.load("./data/clouds.jpg");
+const cloudTexture = textureLoader.load("./data/clouds_8k.jpg");
 cloudTexture.wrapS = THREE.RepeatWrapping;
 cloudTexture.colorSpace = THREE.SRGBColorSpace;
 cloudTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
@@ -110,7 +110,7 @@ detailTexture.wrapS = THREE.RepeatWrapping;
 detailTexture.colorSpace = THREE.SRGBColorSpace;
 detailTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
 
-const starsTexture = textureLoader.load("./data/stars_milky_way.jpg", (tex) => {
+const starsTexture = textureLoader.load("./data/stars_8k.jpg", (tex) => {
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
   scene.background = tex;
