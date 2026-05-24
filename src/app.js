@@ -1,5 +1,9 @@
 import * as THREE from "three";
 import { OrbitControls } from "../vendor/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { CAMERA_TARGETS, focusCamera, resetCamera } from "./camera.js";
 import { createColorTools } from "./colors.js";
 import { FloodModel } from "./flood.js";
@@ -123,6 +127,19 @@ const starsTexture = textureLoader.load("./data/stars_8k.jpg", (tex) => {
 
 const atmosphere = createAtmosphere({ THREE, scene, cloudTexture });
 atmosphere.setSunDirection(sun.position);
+
+const composer = new EffectComposer(renderer);
+composer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+composer.setSize(window.innerWidth, window.innerHeight);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.6,
+  0.35,
+  0.82,
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
 
 const envScene = new THREE.Scene();
 envScene.background = new THREE.Color(0x0a0c11);
@@ -1021,6 +1038,8 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.setSize(window.innerWidth, window.innerHeight);
 }
 
 let prevTime = performance.now();
@@ -1037,7 +1056,7 @@ function animate() {
   if (atmosphere.clouds) {
     terrainUniforms.uCloudOffset.value.x = -atmosphere.clouds.rotation.y / (2 * Math.PI);
   }
-  renderer.render(scene, camera);
+  composer.render();
 }
 
 function formatMeters(value) {
