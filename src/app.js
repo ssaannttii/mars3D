@@ -110,6 +110,11 @@ detailTexture.wrapS = THREE.RepeatWrapping;
 detailTexture.colorSpace = THREE.SRGBColorSpace;
 detailTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
 
+const nightLightsTexture = textureLoader.load("./data/earth_lights.jpg");
+nightLightsTexture.wrapS = THREE.RepeatWrapping;
+nightLightsTexture.colorSpace = THREE.SRGBColorSpace;
+nightLightsTexture.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+
 const starsTexture = textureLoader.load("./data/stars_8k.jpg", (tex) => {
   tex.mapping = THREE.EquirectangularReflectionMapping;
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -149,15 +154,19 @@ const terrainMaterial = new THREE.MeshStandardMaterial({
 
 const terrainUniforms = {
   uCloudMap: { value: cloudTexture },
+  uNightMap: { value: nightLightsTexture },
   uSunDirection: { value: new THREE.Vector3(3.8, 2.6, 2.2).normalize() },
   uCloudShadow: { value: 0.42 },
   uCloudOffset: { value: new THREE.Vector2(0, 0) },
+  uNightLights: { value: 1.0 },
 };
 terrainMaterial.onBeforeCompile = (shader) => {
   shader.uniforms.uCloudMap = terrainUniforms.uCloudMap;
+  shader.uniforms.uNightMap = terrainUniforms.uNightMap;
   shader.uniforms.uSunDirection = terrainUniforms.uSunDirection;
   shader.uniforms.uCloudShadow = terrainUniforms.uCloudShadow;
   shader.uniforms.uCloudOffset = terrainUniforms.uCloudOffset;
+  shader.uniforms.uNightLights = terrainUniforms.uNightLights;
   shader.vertexShader = shader.vertexShader
     .replace(
       "#include <common>",
@@ -174,9 +183,11 @@ terrainMaterial.onBeforeCompile = (shader) => {
       "#include <common>",
       `#include <common>
        uniform sampler2D uCloudMap;
+       uniform sampler2D uNightMap;
        uniform vec3 uSunDirection;
        uniform float uCloudShadow;
        uniform vec2 uCloudOffset;
+       uniform float uNightLights;
        varying vec3 vTerrainNormalW;`,
     )
     .replace(
@@ -193,7 +204,16 @@ terrainMaterial.onBeforeCompile = (shader) => {
        float cloud = texture2D(uCloudMap, cuv).r;
        cloud = clamp(cloud - 0.05, 0.0, 1.0);
        float shadow = 1.0 - cloud * uCloudShadow * sunDot;
-       gl_FragColor.rgb *= shadow;`,
+       gl_FragColor.rgb *= shadow;
+       if (uNightLights > 0.5) {
+         float ndot = dot(nW, sunDir);
+         float night = smoothstep(0.05, -0.15, ndot);
+         vec2 nuv = vec2(lon / (2.0 * 3.14159265) + 0.5, 0.5 - lat / 3.14159265);
+         vec3 cityLights = texture2D(uNightMap, nuv).rgb;
+         vec3 warm = cityLights * vec3(1.25, 1.05, 0.7) * 2.6;
+         float cloudCover = clamp(cloud * 1.4, 0.0, 1.0);
+         gl_FragColor.rgb += warm * night * (1.0 - cloudCover * 0.6);
+       }`,
     );
 };
 
@@ -628,6 +648,7 @@ function wireEvents() {
       state.visualMode = button.dataset.visualMode;
       el.visualButtons.forEach((item) => item.classList.toggle("active", item === button));
       atmosphere.setVisualMode(state.visualMode);
+      terrainUniforms.uNightLights.value = state.visualMode === "earth" ? 1.0 : 0.0;
       updateVisuals({ rebuildWater: true });
     });
   });
